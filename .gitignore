@@ -18,3 +18,6 @@ rag/faiss_store/
 
 # IDE
 .idea/
+
+frontend/node_modules/
+frontend/dist/

@@ -1,6 +1,9 @@
 """
-BaseAgent — OpenAI GPT 호출 공통 기반
-모든 Agent(Bull, Bear, Moderator)가 상속
+agents/base_agent.py — OpenAI 호출 공통 기반
+
+이 파일은 LLM 호출 로직만 담당합니다.
+모델/온도/재시도 설정은 agents/config.py에서 가져옵니다.
+프롬프트는 prompts.py에서 가져옵니다.
 """
 
 import json
@@ -10,6 +13,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI, RateLimitError
+
+from agents.config import MODEL_NAME, RETRY_ATTEMPTS, RETRY_WAIT_SECONDS
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -27,12 +32,7 @@ def get_client() -> OpenAI:
 
 
 class BaseAgent:
-    """
-    GPT 호출 기반 클래스.
-    system_prompt는 각 하위 클래스에서 정의.
-    """
-
-    MODEL = "gpt-4o"
+    """LLM 호출 기반 클래스. 하위 클래스는 system_prompt와 도메인 메서드를 정의."""
 
     def __init__(self):
         self.client = get_client()
@@ -43,13 +43,13 @@ class BaseAgent:
 
     def _chat(self, user_prompt: str, temperature: float = 0.7) -> dict:
         """
-        GPT 호출 → JSON 응답 반환.
-        RateLimitError 발생 시 최대 3회 재시도 (5초 간격)
+        GPT 호출 → JSON 응답 dict 반환.
+        config.RETRY_ATTEMPTS에 따라 RateLimitError 재시도.
         """
-        for attempt in range(3):
+        for attempt in range(RETRY_ATTEMPTS):
             try:
                 response = self.client.chat.completions.create(
-                    model=self.MODEL,
+                    model=MODEL_NAME,
                     messages=[
                         {"role": "system", "content": self.system_prompt},
                         {"role": "user",   "content": user_prompt},
@@ -63,9 +63,9 @@ class BaseAgent:
                 except json.JSONDecodeError:
                     return {"content": raw, "tags": []}
 
-            except RateLimitError as e:
-                if attempt == 2:
+            except RateLimitError:
+                if attempt == RETRY_ATTEMPTS - 1:
                     raise
-                wait = 10 * (attempt + 1)  # 10초, 20초
-                print(f"  ⚠️  Rate limit — {wait}초 후 재시도 ({attempt + 1}/2)")
+                wait = RETRY_WAIT_SECONDS[min(attempt, len(RETRY_WAIT_SECONDS) - 1)]
+                print(f"  ⚠️  Rate limit — {wait}초 후 재시도 ({attempt + 1}/{RETRY_ATTEMPTS - 1})")
                 time.sleep(wait)

@@ -1,150 +1,82 @@
 """
-DebateOrchestrator — 전체 토론 흐름 제어
+agents/orchestrator.py — 토론 흐름 실행 엔진
 
-흐름:
-1. QueryExpander로 쿼리 3종 생성
-2. RAGRetriever로 기사 검색
-3. 라운드별 Bull → Bear 순서로 발언
-4. Moderator 최종 결론
+이 파일은 로직만 담당합니다. 발언 순서/모델/온도는 config.py에서 가져옵니다.
+프롬프트는 prompts.py를 통해 분리되어 있습니다.
+
+알고리즘:
+  1. config.DEBATE_FLOW의 각 라운드를 순회.
+  2. 라운드 내 step들을 의존성 레벨로 분류:
+       Level 0: argue/conclude (의존성 없음)
+       Level 1+: rebut (Level 0의 결과를 입력으로 받음)
+  3. 같은 레벨은 ThreadPoolExecutor로 병렬 호출.
+  4. 출력은 DEBATE_FLOW에 선언된 step 순서대로 정렬.
 """
 
-from agents.bull_agent import BullAgent
-from agents.bear_agent import BearAgent
+from concurrent.futures import ThreadPoolExecutor
+
+from agents.analyst import AnalystAgent
 from agents.moderator import ModeratorAgent
-from query_expander import expand_query
+from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE
+from agents.query_expander import expand_query
 from rag.retriever import search, _detect_ticker
 from rag.quant_fetcher import fetch_quant, format_quant
 
 
 class DebateOrchestrator:
-    """
-    사용 예:
-        orchestrator = DebateOrchestrator()
-        result = orchestrator.run(topic="삼성전자", rounds=3)
-    """
 
     def __init__(self):
-        self.bull = BullAgent()
-        self.bear = BearAgent()
+        self.agents = {
+            "bull": AnalystAgent("bull"),
+            "bear": AnalystAgent("bear"),
+        }
         self.moderator = ModeratorAgent()
 
-    def run(
-        self,
-        topic: str,
-        rounds: int = 3,
-        top_k: int = 5,
-        on_round_complete=None,   # 라운드 완료 시 콜백 (Streamlit 실시간 출력용)
-    ) -> dict:
-        """
-        토론 전체 실행
-
-        Args:
-            topic: 토론 주제 (예: "삼성전자", "삼성전자 005930")
-            rounds: 토론 라운드 수 (기본 3)
-            top_k: RAG 검색 결과 수
-            on_round_complete: 라운드 완료 콜백 fn(round_num, bull_result, bear_result)
-
-        Returns:
-            {
-                "topic": str,
-                "rounds": [
-                    {
-                        "round": int,
-                        "bull": {"content": str, "tags": list},
-                        "bear": {"content": str, "tags": list},
-                    },
-                    ...
-                ],
-                "moderator": {
-                    "bull_summary": str,
-                    "bear_summary": str,
-                    "conclusion": str,
-                    "verdict": str,
-                },
-                "articles": {
-                    "common": list,
-                    "bull": list,
-                    "bear": list,
-                }
-            }
-        """
-
-        # ── 1단계: 쿼리 확장 ─────────────────────────────
+    # ─────────────────────────────────────────────────────
+    def run(self, topic: str, on_round_complete=None) -> dict:
+        # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
+        articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON)
+        articles_bull   = search(queries["bull"],   source="articles", top_k=TOP_K_SIDE)
+        articles_bear   = search(queries["bear"],   source="articles", top_k=TOP_K_SIDE)
 
-        # ── 2단계: 기사 검색 ─────────────────────────────
-        # ticker 자동 감지는 retriever 내부에서 처리
-        articles_common = search(queries["common"], source="articles", top_k=3)
-        articles_bull   = search(queries["bull"],   source="articles", top_k=2)
-        articles_bear   = search(queries["bear"],   source="articles", top_k=2)
-
-        # ── 2.5단계: 정량 데이터 조회 (Round 2+용) ──────
-        # ticker 감지 실패 시 quant_text = "" → Round 2도 기사만 사용
         detected_ticker = _detect_ticker(topic)
         quant_data = fetch_quant(detected_ticker) if detected_ticker else None
         quant_text = format_quant(quant_data) if quant_data else ""
 
-        # ── 3단계: 라운드별 토론 ─────────────────────────
-        debate_history: list[dict] = []
-        round_results: list[dict] = []
+        articles_by_side = {
+            "bull": articles_bull,
+            "bear": articles_bear,
+        }
 
-        for r in range(1, rounds + 1):
-
-            # 라운드별 데이터 구성
-            # Round 1: 기사(정성)만
-            # Round 2: 정량만 (기사 제외)
-            # Round 3: 기사 + 정량 통합
-            use_articles = (r != 2)
-            use_quant    = (r >= 2)
-
-            bull_result = self.bull.speak(
+        # ── 2. 라운드별 실행 ──────────────────────────
+        all_rounds: list[list[dict]] = []
+        for round_cfg in DEBATE_FLOW:
+            round_msgs = self._run_round(
+                round_cfg=round_cfg,
                 topic=topic,
-                articles_common=articles_common if use_articles else [],
-                articles_bull=articles_bull     if use_articles else [],
-                debate_history=debate_history,
-                round_num=r,
-                quant_text=quant_text if use_quant else "",
+                articles_common=articles_common,
+                articles_by_side=articles_by_side,
+                quant_text=quant_text,
             )
-            debate_history.append({
-                "round":   r,
-                "role":    "Bull",
-                "content": bull_result.get("content", ""),
-            })
-
-            bear_result = self.bear.speak(
-                topic=topic,
-                articles_common=articles_common if use_articles else [],
-                articles_bear=articles_bear     if use_articles else [],
-                debate_history=debate_history,
-                round_num=r,
-                quant_text=quant_text if use_quant else "",
-            )
-            debate_history.append({
-                "round":   r,
-                "role":    "Bear",
-                "content": bear_result.get("content", ""),
-            })
-
-            round_results.append({
-                "round": r,
-                "bull":  bull_result,
-                "bear":  bear_result,
-            })
-
-            # Streamlit 실시간 출력용 콜백
+            all_rounds.append(round_msgs)
             if on_round_complete:
-                on_round_complete(r, bull_result, bear_result)
+                on_round_complete(round_cfg["round"], round_msgs)
 
-        # ── 4단계: Moderator 결론 ─────────────────────────
+        # ── 3. Moderator 결론 ─────────────────────────
+        moderator_history = [
+            {"round": m["round"], "role": m["role"].capitalize(), "content": m["content"]}
+            for round_msgs in all_rounds for m in round_msgs
+        ]
         moderator_result = self.moderator.conclude(
             topic=topic,
-            debate_history=debate_history,
+            debate_history=moderator_history,
             articles_common=articles_common,
         )
 
         return {
-            "topic":     topic,
-            "rounds":    round_results,
+            "topic": topic,
+            "rounds": all_rounds,
             "moderator": moderator_result,
             "articles": {
                 "common": articles_common,
@@ -152,3 +84,105 @@ class DebateOrchestrator:
                 "bear":   articles_bear,
             },
         }
+
+    # ─────────────────────────────────────────────────────
+    def _run_round(
+        self,
+        round_cfg: dict,
+        topic: str,
+        articles_common: list[dict],
+        articles_by_side: dict[str, list[dict]],
+        quant_text: str,
+    ) -> list[dict]:
+        """한 라운드 실행. 의존성 레벨별로 병렬 호출."""
+        round_num = round_cfg["round"]
+        steps     = round_cfg["steps"]
+        use_articles = "articles" in round_cfg["data"]
+        use_quant    = "quant"    in round_cfg["data"]
+
+        # 라운드별 데이터 결정
+        eff_articles_common = articles_common if use_articles else []
+        eff_quant_text      = quant_text      if use_quant    else ""
+
+        # step 호출 콘텍스트
+        def call_step(step: dict, prior_results: dict[int, dict]) -> dict:
+            role = step["role"]
+            agent = self.agents[role]
+            opponent_statement = ""
+            if step["action"] == "rebut":
+                opponent_idx = _find_step(steps, *step["rebuts"])
+                if opponent_idx is not None and opponent_idx in prior_results:
+                    opponent_statement = prior_results[opponent_idx].get("content", "")
+            return agent.run_action(
+                action=step["action"],
+                topic=topic,
+                round_num=round_num,
+                articles_common=eff_articles_common,
+                articles_side=articles_by_side[role] if use_articles else [],
+                quant_text=eff_quant_text,
+                opponent_statement=opponent_statement,
+            )
+
+        # 의존성 레벨 계산
+        levels = _compute_levels(steps)
+
+        # 레벨별 순차 실행, 같은 레벨은 병렬
+        results: dict[int, dict] = {}
+        for level_indices in levels:
+            with ThreadPoolExecutor(max_workers=max(len(level_indices), 1)) as ex:
+                future_to_idx = {
+                    ex.submit(call_step, steps[i], results): i
+                    for i in level_indices
+                }
+                for future in future_to_idx:
+                    idx = future_to_idx[future]
+                    results[idx] = future.result()
+
+        # DEBATE_FLOW에 선언된 step 순서대로 정렬해서 반환
+        return [
+            _to_message(round_num, steps[i], results[i])
+            for i in range(len(steps))
+        ]
+
+
+# ═════════════════════════════════════════════════════════
+# 내부 헬퍼
+# ═════════════════════════════════════════════════════════
+def _find_step(steps: list[dict], target_role: str, target_action: str) -> int | None:
+    """주어진 (role, action)에 매칭되는 step의 index 반환."""
+    for i, s in enumerate(steps):
+        if s["role"] == target_role and s["action"] == target_action:
+            return i
+    return None
+
+
+def _compute_levels(steps: list[dict]) -> list[list[int]]:
+    """
+    step들을 의존성 레벨로 그룹화.
+    Level 0: rebut이 아닌 step (의존성 없음)
+    Level N: 의존하는 step의 레벨 + 1
+    """
+    level_of: dict[int, int] = {}
+    for i, step in enumerate(steps):
+        if step["action"] != "rebut":
+            level_of[i] = 0
+        else:
+            target = _find_step(steps, *step["rebuts"])
+            level_of[i] = (level_of.get(target, -1) + 1) if target is not None else 1
+
+    max_level = max(level_of.values(), default=0)
+    groups: list[list[int]] = [[] for _ in range(max_level + 1)]
+    for i, lvl in level_of.items():
+        groups[lvl].append(i)
+    return groups
+
+
+def _to_message(round_num: int, step: dict, result: dict) -> dict:
+    """에이전트 결과를 메시지 dict로 변환."""
+    return {
+        "round":   round_num,
+        "role":    step["role"],          # 'bull' | 'bear'
+        "kind":    step["action"],        # 'argue' | 'rebut' | 'conclude'
+        "content": result.get("content", ""),
+        "tags":    result.get("tags", []),
+    }

@@ -61,7 +61,7 @@ def _fetch_articles(faiss_ids: list[int]) -> list[dict]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(f"""
             SELECT a.faiss_id, a.ticker, c.corp_name,
-                   a.title, a.content, a.source, a.published_at
+                   a.title, a.content, a.source, a.published_at, a.url
             FROM articles a
             JOIN companies c ON a.ticker = c.ticker
             WHERE a.faiss_id IN ({placeholders})

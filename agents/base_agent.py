@@ -5,10 +5,11 @@ BaseAgent — OpenAI GPT 호출 공통 기반
 
 import json
 import os
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -43,19 +44,28 @@ class BaseAgent:
     def _chat(self, user_prompt: str, temperature: float = 0.7) -> dict:
         """
         GPT 호출 → JSON 응답 반환.
-        응답 형식: {"content": "발언 내용", "tags": ["태그1", "태그2"]}
+        RateLimitError 발생 시 최대 3회 재시도 (5초 간격)
         """
-        response = self.client.chat.completions.create(
-            model=self.MODEL,
-            messages=[
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=temperature,
-        )
-        raw = response.choices[0].message.content
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            return {"content": raw, "tags": []}
+        for attempt in range(3):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.MODEL,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=temperature,
+                )
+                raw = response.choices[0].message.content
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError:
+                    return {"content": raw, "tags": []}
+
+            except RateLimitError as e:
+                if attempt == 2:
+                    raise
+                wait = 10 * (attempt + 1)  # 10초, 20초
+                print(f"  ⚠️  Rate limit — {wait}초 후 재시도 ({attempt + 1}/2)")
+                time.sleep(wait)

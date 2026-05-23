@@ -22,7 +22,7 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "identifier.sqlite"
 
 HEADERS = {
@@ -117,12 +117,16 @@ def fetch_news_list(ticker: str, page: int) -> list[dict]:
         office_id  = m_oid.group(1)
         naver_url  = f"https://n.news.naver.com/mnews/article/{office_id}/{article_id}"
 
+        published_at = parse_date(td_date.get_text(" ", strip=True))
+        if not published_at:
+            continue
+
         items.append({
             "article_id":  article_id,
             "office_id":   office_id,
             "title":       a_tag.get_text(strip=True),
             "source":      td_info.get_text(strip=True) if td_info else "",
-            "published_at": parse_date(td_date.get_text(strip=True)),
+            "published_at": published_at,
             "url":         naver_url,
         })
 
@@ -193,31 +197,72 @@ def fetch_article_content(office_id: str, article_id: str) -> str:
 
 
 # ── 날짜 파싱 ────────────────────────────────────────────
-def parse_date(date_str: str) -> str:
+def parse_date(date_str: str) -> str | None:
     """
     '2026.05.14 09:30' 또는 '2026.05.14' → 'YYYY-MM-DD HH:MM:SS'
     '05.14 09:30' 형식도 처리 (연도 없을 때 현재 연도 사용)
+    파싱할 수 없는 값은 크롤링 시각으로 대체하지 않고 None 반환
     """
-    date_str = date_str.strip()
+    date_str = re.sub(r"\s+", " ", date_str.strip())
 
-    formats = [
-        (r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", "%Y.%m.%d %H:%M"),
-        (r"\d{4}\.\d{2}\.\d{2}",              "%Y.%m.%d"),
-    ]
-    for pattern, fmt in formats:
-        if re.match(pattern, date_str):
-            try:
-                return datetime.strptime(date_str[:len(fmt)], fmt).strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                pass
+    def normalize_hour(hour: int, ampm: str | None) -> int:
+        if ampm == "오후" and hour < 12:
+            return hour + 12
+        if ampm == "오전" and hour == 12:
+            return 0
+        return hour
 
-    # 월.일 시:분 (연도 없음)
-    m = re.match(r"(\d{2})\.(\d{2}) (\d{2}):(\d{2})", date_str)
+    def make_datetime(year: int, month: int, day: int,
+                      hour: int = 0, minute: int = 0,
+                      ampm: str | None = None) -> str | None:
+        try:
+            hour = normalize_hour(hour, ampm)
+            return datetime(year, month, day, hour, minute).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+
+    # 연.월.일 시:분, 또는 연.월.일 오전/오후 시:분
+    m = re.match(
+        r"(?P<year>\d{4})\.(?P<month>\d{1,2})\.(?P<day>\d{1,2})\.?\s*"
+        r"(?:(?P<ampm>오전|오후)\s*)?(?P<hour>\d{1,2}):(?P<minute>\d{2})",
+        date_str,
+    )
     if m:
-        year = datetime.now().year
-        return f"{year}-{m.group(1)}-{m.group(2)} {m.group(3)}:{m.group(4)}:00"
+        return make_datetime(
+            int(m.group("year")),
+            int(m.group("month")),
+            int(m.group("day")),
+            int(m.group("hour")),
+            int(m.group("minute")),
+            m.group("ampm"),
+        )
 
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 연.월.일만 있는 경우
+    m = re.match(r"(?P<year>\d{4})\.(?P<month>\d{1,2})\.(?P<day>\d{1,2})\.?$", date_str)
+    if m:
+        return make_datetime(
+            int(m.group("year")),
+            int(m.group("month")),
+            int(m.group("day")),
+        )
+
+    # 월.일 시:분 (네이버 증권 목록에서 연도 생략 시 현재 연도 사용)
+    m = re.match(
+        r"(?P<month>\d{1,2})\.(?P<day>\d{1,2})\s*"
+        r"(?:(?P<ampm>오전|오후)\s*)?(?P<hour>\d{1,2}):(?P<minute>\d{2})",
+        date_str,
+    )
+    if m:
+        return make_datetime(
+            datetime.now().year,
+            int(m.group("month")),
+            int(m.group("day")),
+            int(m.group("hour")),
+            int(m.group("minute")),
+            m.group("ampm"),
+        )
+
+    return None
 
 
 # ── 고유 ID ──────────────────────────────────────────────

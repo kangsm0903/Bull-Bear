@@ -52,40 +52,40 @@ def run_debate(req: DebateRequest):
             messages.append({
                 "id":        str(uuid.uuid4()),
                 "agent":     item["role"],          # 'bull' | 'bear'
-                "kind":      item["kind"],          # 'argument' | 'rebuttal' | 'conclusion'
+                "kind":      item["kind"],          # 'argue' | 'rebut' | 'conclude'
                 "round":     item["round"],        # 1 | 2 | 3
                 "message":   item["content"],
                 "timestamp": now,
             })
 
-    # ── 기사 변환 ──────────────────────────────────────────
+    # ── 기사 변환 (중복 제거) ───────────────────────────────
+    # 같은 기사가 common/bull/bear에 동시에 잡힐 수 있으므로 faiss_id(없으면 url)로 합침.
+    # referencedBy: common 포함 또는 bull+bear 양쪽 → "both", 한쪽만 → 해당 진영.
+    seen: dict = {}  # key → {"article": a, "sides": set}
+    for side in ("common", "bull", "bear"):
+        for a in result["articles"][side]:
+            key = a.get("faiss_id") or a.get("url") or a.get("title")
+            if key not in seen:
+                seen[key] = {"article": a, "sides": set()}
+            seen[key]["sides"].add(side)
+
     articles = []
-    for a in result["articles"]["bull"]:
+    for entry in seen.values():
+        a = entry["article"]
+        sides = entry["sides"]
+        if "common" in sides or ("bull" in sides and "bear" in sides):
+            ref = "both"
+        elif "bull" in sides:
+            ref = "bull"
+        else:
+            ref = "bear"
         articles.append({
             "id":           str(uuid.uuid4()),
             "title":        a.get("title", ""),
             "source":       a.get("source", ""),
             "date":         (a.get("published_at") or "")[:10],
             "url":          a.get("url") or "#",
-            "referencedBy": "bull",
-        })
-    for a in result["articles"]["bear"]:
-        articles.append({
-            "id":           str(uuid.uuid4()),
-            "title":        a.get("title", ""),
-            "source":       a.get("source", ""),
-            "date":         (a.get("published_at") or "")[:10],
-            "url":          a.get("url") or "#",
-            "referencedBy": "bear",
-        })
-    for a in result["articles"]["common"]:
-        articles.append({
-            "id":           str(uuid.uuid4()),
-            "title":        a.get("title", ""),
-            "source":       a.get("source", ""),
-            "date":         (a.get("published_at") or "")[:10],
-            "url":          a.get("url") or "#",
-            "referencedBy": "both",
+            "referencedBy": ref,
         })
 
     # ── 점수 / Moderator ───────────────────────────────────

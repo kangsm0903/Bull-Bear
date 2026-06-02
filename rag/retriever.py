@@ -36,12 +36,55 @@ def _get_corp_map() -> dict[str, str]:
 
 
 def _detect_ticker(query: str) -> str | None:
-    """쿼리에서 회사명을 감지해 ticker 반환. 못 찾으면 None."""
+    """쿼리에서 회사명을 감지해 ticker 반환. 못 찾으면 None.
+
+    2-pass 매칭:
+      1) 정식 corp_name 부분일치 ("SK하이닉스 전망")
+      2) 별칭(접두사 제거형) 부분일치 ("하이닉스 전망" → SK하이닉스)
+    정식명을 우선 시도해 별칭 충돌(예: 'LG전자' vs '전자') 위험을 줄임.
+    """
     corp_map = _get_corp_map()
-    for corp_name, ticker in corp_map.items():
-        if corp_name in query:
+    # 1) 정식명 우선
+    for name, ticker in corp_map.items():
+        if name in query:
             return ticker
+    # 2) 별칭 폴백 — _name_aliases는 _ticker_to_name 아래에 정의돼 있음
+    for name, ticker in corp_map.items():
+        for alias in _name_aliases(name):
+            if alias != name and alias in query:
+                return ticker
     return None
+
+
+def _ticker_to_name(ticker: str) -> str:
+    """ticker → 회사명. 없으면 빈 문자열."""
+    for name, t in _get_corp_map().items():
+        if t == ticker:
+            return name
+    return ""
+
+
+# 시황/시장요약 등 영양가 낮은 기사를 거르는 제목 키워드 블록리스트
+MARKET_NOISE_KEYWORDS = [
+    "코스피", "코스닥", "증시", "시황", "특징주", "급등주", "급락주", "마감 시황",
+]
+
+# 그룹 접두사 — 제거해 별칭 생성 (예: "SK하이닉스" → "하이닉스")
+GROUP_PREFIXES = ("SK", "LG", "GS", "CJ", "KT", "NH", "DB", "HD", "DL", "POSCO")
+
+
+def _noise_clause() -> str:
+    """제목 블록리스트를 SQL AND 절로 변환 (키워드는 상수이므로 인젝션 위험 없음)."""
+    return " ".join(f"AND title NOT LIKE '%{kw}%'" for kw in MARKET_NOISE_KEYWORDS)
+
+
+def _name_aliases(corp_name: str) -> list[str]:
+    """제목 매칭용 별칭. 정식명 + 그룹 접두사 제거형(3자 이상일 때만)."""
+    aliases = [corp_name]
+    for p in GROUP_PREFIXES:
+        if corp_name.startswith(p) and len(corp_name) - len(p) >= 3:
+            aliases.append(corp_name[len(p):])
+    return aliases
 
 
 def _load_index(source: str) -> faiss.Index:
@@ -88,12 +131,82 @@ def _fetch_dart(faiss_ids: list[int]) -> list[dict]:
     return [id_to_row[fid] for fid in faiss_ids if fid in id_to_row]
 
 
+def _recent_faiss_ids(ticker: str | None, pool_size: int) -> list[int]:
+    """종목의 최신 후보 풀(faiss_id)을 published_at 내림차순으로 반환.
+
+    품질 필터 (검색 시점):
+      · 시황/시장요약 등 노이즈 제목 제외 (MARKET_NOISE_KEYWORDS)
+      · Tier1: 제목에 종목명(별칭 포함)이 든 "그 기업 중심" 기사만
+      · Tier2: Tier1이 완전히 비었을 때만 폴백 (빈 결과 방지용).
+               → 평소엔 제목 무관 기사로 풀을 채우지 않아 타사 중심 기사가 섞이지 않음
+    ticker가 None이면 노이즈만 제외한 전체 최신 기사.
+    """
+    noise = _noise_clause()
+    with sqlite3.connect(DB_PATH) as conn:
+        if not ticker:
+            rows = conn.execute(f"""
+                SELECT faiss_id FROM articles
+                WHERE faiss_id IS NOT NULL {noise}
+                ORDER BY published_at DESC
+                LIMIT ?
+            """, (pool_size,)).fetchall()
+            return [int(r[0]) for r in rows]
+
+        corp_name = _ticker_to_name(ticker)
+        aliases = _name_aliases(corp_name)
+        like_clause = " OR ".join("title LIKE ?" for _ in aliases)
+        like_params = [f"%{a}%" for a in aliases]
+
+        # Tier1: 제목에 종목명(별칭 포함)이 든 기사만 + 노이즈 제외
+        tier1 = conn.execute(f"""
+            SELECT faiss_id FROM articles
+            WHERE ticker = ? AND faiss_id IS NOT NULL
+              AND ({like_clause}) {noise}
+            ORDER BY published_at DESC
+            LIMIT ?
+        """, (ticker, *like_params, pool_size)).fetchall()
+        ids = [int(r[0]) for r in tier1]
+
+        # Tier2: Tier1이 완전히 비었을 때만 폴백 (빈 결과 방지)
+        if not ids:
+            tier2 = conn.execute(f"""
+                SELECT faiss_id FROM articles
+                WHERE ticker = ? AND faiss_id IS NOT NULL {noise}
+                ORDER BY published_at DESC
+                LIMIT ?
+            """, (ticker, pool_size)).fetchall()
+            ids = [int(r[0]) for r in tier2]
+
+    return ids
+
+
+def _rank_pool_by_similarity(
+    index: faiss.Index,
+    query_vec: np.ndarray,
+    pool_ids: list[int],
+    top_k: int,
+) -> list[tuple[int, float]]:
+    """후보 풀(pool_ids) 안에서만 query와의 cosine 유사도순으로 정렬해 top_k 반환.
+    IndexFlatIP.reconstruct로 빌드 시 정규화된 벡터를 되찾아 내적(=cosine)을 계산한다."""
+    q = query_vec[0]
+    ntotal = index.ntotal
+    scored: list[tuple[int, float]] = []
+    for fid in pool_ids:
+        if fid >= ntotal:          # 인덱스보다 큰 faiss_id(스테일) 방어
+            continue
+        vec = index.reconstruct(fid)   # 빌드 시 정규화된 벡터
+        scored.append((fid, float(np.dot(q, vec))))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_k]
+
+
 def search(
     query: str,
     source: str = "articles",  # "articles" | "dart"
     top_k: int = 5,
     ticker: str = None,         # 특정 종목만 필터링 (선택)
     auto_detect: bool = True,   # 쿼리에서 회사명 자동 감지해 ticker 부스팅
+    recent_pool: int = 30,      # 하이브리드 최신 후보 풀 크기 (앱에서는 config.RECENT_POOL 주입)
 ) -> list[dict]:
     """
     query를 임베딩해 FAISS로 유사 문서를 검색하고 SQLite 메타데이터를 반환
@@ -104,9 +217,15 @@ def search(
         top_k: 반환할 결과 수 (ticker 필터 시 여유있게 크게 설정)
         ticker: 특정 종목 코드로 필터링 (예: "005930")
         auto_detect: True이면 쿼리에서 회사명 자동 감지 → 해당 종목 결과 우선 정렬
+        recent_pool: 하이브리드 검색 시 종목별 최신 후보 풀 크기
 
     Returns:
         유사도 순으로 정렬된 문서 메타데이터 리스트
+
+    검색 전략:
+        articles + 종목 감지 시 → "최신 풀 → 유사도 정렬" 하이브리드
+            (해당 종목의 최신 recent_pool개 기사만 후보로 두고, 그 안에서 유사도 top_k)
+        그 외(dart / 종목 미감지 / 빈 풀) → 기존 전역 유사도 검색으로 폴백
     """
     index = _load_index(source)
 
@@ -116,6 +235,21 @@ def search(
 
     # ticker 필터 또는 자동 감지 시 여유있게 검색 후 필터
     detected_for_boost = _detect_ticker(query) if (auto_detect and not ticker) else None
+
+    # ── 하이브리드: articles + 종목 감지 시 "최신 풀 → 유사도 정렬" ──
+    hybrid_ticker = ticker or detected_for_boost
+    if source == "articles" and hybrid_ticker:
+        pool_ids = _recent_faiss_ids(hybrid_ticker, recent_pool)
+        if pool_ids:
+            ranked = _rank_pool_by_similarity(index, query_vec, pool_ids, top_k)
+            results = _fetch_articles([fid for fid, _ in ranked])
+            score_map = dict(ranked)
+            for r in results:
+                r["score"] = score_map.get(r["faiss_id"], 0.0)
+            return results
+        # 풀이 비면(=해당 종목 faiss_id 없음) 아래 전역 검색으로 폴백
+
+    # ── 폴백: 기존 전역 유사도 검색 ──
     search_k = top_k * 10 if (ticker or detected_for_boost) else top_k
     scores, faiss_ids = index.search(query_vec, search_k)
 

@@ -22,7 +22,8 @@ export function LoadingScreen({ topic }: LoadingScreenProps) {
 
   useEffect(() => {
     const stageTimer = setInterval(() => {
-      setStageIndex(prev => (prev + 1) % CYCLING_STAGES.length);
+      // 마지막 단계에서 멈춤 (처음으로 되돌아가지 않음)
+      setStageIndex(prev => Math.min(prev + 1, CYCLING_STAGES.length - 1));
     }, 8000);
     return () => clearInterval(stageTimer);
   }, []);
@@ -139,28 +140,12 @@ export function LoadingScreen({ topic }: LoadingScreenProps) {
           </motion.div>
         </div>
 
-        {/* Active stage card */}
+        {/* Active stage card — 고정 박스, 단계가 바뀔 때마다 내용만 페이드 교체 */}
         <motion.div
-          className="space-y-4"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          {/* Completed stages (dimmed) */}
-          {stages.slice(0, stageIndex).map((stage, index) => {
-            const Icon = stage.icon;
-            return (
-              <div key={index} className="flex items-center gap-4 p-3 rounded-xl opacity-30">
-                <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-4 h-4 text-slate-500" />
-                </div>
-                <p className="text-slate-500 text-sm line-through">{stage.label}</p>
-                <div className="ml-auto text-slate-600 text-xs">✓</div>
-              </div>
-            );
-          })}
-
-          {/* Current active stage */}
           <AnimatePresence mode="wait">
             {(() => {
               const stage = stages[stageIndex];
@@ -180,10 +165,10 @@ export function LoadingScreen({ topic }: LoadingScreenProps) {
               return (
                 <motion.div
                   key={stageIndex}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.4 }}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.5, ease: 'easeInOut' }}
                 >
                   <div className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl backdrop-blur-sm">
                     <div className={`w-10 h-10 rounded-lg ${colorClasses} border flex items-center justify-center flex-shrink-0`}>

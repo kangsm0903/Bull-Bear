@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { DebateMessage } from './DebateMessage';
 import { ArticleReference, Article } from './ArticleReference';
 import { ArrowLeft, Activity, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
@@ -45,13 +45,8 @@ export function DebateChat({ topic, debateData, onBack }: DebateChatProps) {
   const [visibleMessages, setVisibleMessages] = useState<Message[]>([]);
   const [showModerator, setShowModerator]     = useState(false);
   const [isPlaying, setIsPlaying]             = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { messages, articles, bull_score, bear_score, moderator } = debateData;
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [visibleMessages, showModerator]);
 
   // 메시지를 1.5초 간격으로 순차 출력
   useEffect(() => {
@@ -222,8 +217,6 @@ export function DebateChat({ topic, debateData, onBack }: DebateChatProps) {
               </div>
             </motion.div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
       </div>
 

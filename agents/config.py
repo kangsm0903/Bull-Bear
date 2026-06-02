@@ -9,10 +9,15 @@ agents/config.py — 토론 설정 (사용자 편집용)
 # ─────────────────────────────────────────────────────────
 # 1. LLM 모델 설정
 # ─────────────────────────────────────────────────────────
-MODEL_NAME = "gpt-4o"
-# 후보: "gpt-4o" (고품질), "gpt-4o-mini" (1/10 비용), "gpt-4-turbo"
+MODEL_NAME = "gpt-5.4"
+# 후보: "gpt-5.4", "gpt-5", "gpt-5-mini" 등. 정확한 API id는 OpenAI 문서 확인.
+
+# 추론(reasoning) 강도. 추론 모델일 때만 사용: "minimal" | "low" | "medium" | "high"
+# 비추론 모델(gpt-4o 등)을 쓸 거면 None으로 두면 temperature가 대신 적용됩니다.
+REASONING_EFFORT = "low"
 
 # 발언 종류별 temperature (높을수록 다양/창의적, 낮을수록 일관/결정적)
+# ⚠️ REASONING_EFFORT가 설정되면 추론 모델은 temperature를 무시하므로 이 값은 적용되지 않습니다.
 TEMPERATURE = {
     "argue":     0.7,
     "rebut":     0.7,
@@ -30,6 +35,11 @@ RETRY_WAIT_SECONDS = [10, 20]   # 1번째 실패 후 10초, 2번째 실패 후 2
 # ─────────────────────────────────────────────────────────
 TOP_K_COMMON = 3   # 공통 기사 수
 TOP_K_SIDE   = 2   # Bull/Bear 측 기사 수
+
+# 하이브리드 검색: 종목별 최신 기사 N개로 후보 풀을 만든 뒤,
+# 그 풀 안에서만 유사도순으로 top_k를 선택합니다 (오래된 기사는 후보에서 제외).
+# → 최신성(published_at) + 관련성(유사도)을 동시에 확보.
+RECENT_POOL  = 30  # 종목별 최신 후보 풀 크기 (published_at 내림차순)
 
 
 # ─────────────────────────────────────────────────────────

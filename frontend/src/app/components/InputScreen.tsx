@@ -127,9 +127,6 @@ export function InputScreen({ onStartDebate }: InputScreenProps) {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-lg font-bold text-white">{example.ticker}</span>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            example.sentiment === 'bullish' ? 'bg-emerald-500' : 'bg-slate-500'
-                          }`} />
                         </div>
                         <p className="text-sm text-slate-400">{example.name}</p>
                       </div>

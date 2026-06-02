@@ -9,6 +9,17 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "identifier.sqlite"
 
+# 매크로 지표 표시 설정: indicator → (라벨, 값 포맷 함수)
+MACRO_DISPLAY = {
+    "usd_krw": ("원/달러 환율", lambda v: f"{v:,.1f}원"),
+    "us_10y":  ("미국 10년물 금리", lambda v: f"{v:.2f}"),
+    "wti":     ("WTI 유가", lambda v: f"${v:.1f}"),
+    "kospi":   ("KOSPI", lambda v: f"{v:,.1f}p"),
+    "kosdaq":  ("KOSDAQ", lambda v: f"{v:,.1f}p"),
+    "sp500":   ("S&P500", lambda v: f"{v:,.1f}p"),
+    "nasdaq":  ("나스닥", lambda v: f"{v:,.1f}p"),
+}
+
 
 def fetch_quant(ticker: str) -> dict | None:
     """
@@ -51,7 +62,14 @@ def fetch_quant(ticker: str) -> dict | None:
             LIMIT 1
         """, (ticker,)).fetchone()
 
-    if not fin and not con and not price:
+        # 매크로 지표 (종목 무관, 시장 전체) — 가장 최근 날짜의 모든 지표
+        macro_rows = conn.execute("""
+            SELECT indicator, close, change_pct
+            FROM macro_daily
+            WHERE date = (SELECT MAX(date) FROM macro_daily)
+        """).fetchall()
+
+    if not fin and not con and not price and not macro_rows:
         return None
 
     result = {}
@@ -61,6 +79,11 @@ def fetch_quant(ticker: str) -> dict | None:
         result["consensus"] = dict(con)
     if price:
         result["price"] = dict(price)
+    if macro_rows:
+        result["macro"] = {
+            r["indicator"]: {"close": r["close"], "change_pct": r["change_pct"]}
+            for r in macro_rows
+        }
 
     return result
 
@@ -103,5 +126,18 @@ def format_quant(quant: dict) -> str:
             lines.append(f"  공매도비율: {short:.2f}%")
         if fgn:
             lines.append(f"  외국인보유: {fgn:.1f}%")
+
+    if "macro" in quant:
+        m = quant["macro"]
+        lines.append(f"\n[매크로 지표 (시장 전체)]")
+        for key, (label, fmt) in MACRO_DISPLAY.items():
+            if key not in m:
+                continue
+            close = m[key].get("close")
+            if close is None:
+                continue
+            chg = m[key].get("change_pct")
+            chg_text = f"  ({chg:+.2f}%)" if chg is not None else ""
+            lines.append(f"  {label}: {fmt(close)}{chg_text}")
 
     return "\n".join(lines)

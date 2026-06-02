@@ -17,7 +17,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from agents.analyst import AnalystAgent
 from agents.moderator import ModeratorAgent
-from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE
+from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE, RECENT_POOL
+from agents.prompts import CONTENT_FIELDS
 from agents.query_expander import expand_query
 from rag.retriever import search, _detect_ticker
 from rag.quant_fetcher import fetch_quant, format_quant
@@ -36,9 +37,9 @@ class DebateOrchestrator:
     def run(self, topic: str, on_round_complete=None) -> dict:
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
-        articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON)
-        articles_bull   = search(queries["bull"],   source="articles", top_k=TOP_K_SIDE)
-        articles_bear   = search(queries["bear"],   source="articles", top_k=TOP_K_SIDE)
+        articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON, recent_pool=RECENT_POOL)
+        articles_bull   = search(queries["bull"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL)
+        articles_bear   = search(queries["bear"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL)
 
         detected_ticker = _detect_ticker(topic)
         quant_data = fetch_quant(detected_ticker) if detected_ticker else None
@@ -177,12 +178,23 @@ def _compute_levels(steps: list[dict]) -> list[list[int]]:
     return groups
 
 
+def _join_content(action: str, result: dict) -> str:
+    """4단 필드를 순서대로 \\n으로 합쳐 한 메시지(4줄)로 만든다.
+    구조화 필드가 없으면(파싱 실패 등) 단일 content로 폴백."""
+    fields = CONTENT_FIELDS.get(action)
+    if fields:
+        parts = [str(result[f]).strip() for f in fields if result.get(f)]
+        if parts:
+            return "\n".join(parts)
+    return result.get("content", "")
+
+
 def _to_message(round_num: int, step: dict, result: dict) -> dict:
     """에이전트 결과를 메시지 dict로 변환."""
     return {
         "round":   round_num,
         "role":    step["role"],          # 'bull' | 'bear'
         "kind":    step["action"],        # 'argue' | 'rebut' | 'conclude'
-        "content": result.get("content", ""),
+        "content": _join_content(step["action"], result),
         "tags":    result.get("tags", []),
     }

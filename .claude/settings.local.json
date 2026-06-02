@@ -3,7 +3,9 @@
     "allow": [
       "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite \".tables\")",
       "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite \".schema\")",
-      "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite ' *)"
+      "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite ' *)",
+      "Bash(sqlite3 identifier.sqlite \"SELECT COUNT\\(*\\) AS total, MIN\\(published_at\\) AS oldest, MAX\\(published_at\\) AS newest FROM articles;\")",
+      "Bash(sqlite3 identifier.sqlite \"SELECT published_at FROM articles ORDER BY published_at DESC LIMIT 3;\")"
     ]
   }
 }

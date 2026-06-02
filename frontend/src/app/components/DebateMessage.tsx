@@ -66,11 +66,7 @@ export function DebateMessage({ agent, message, timestamp, kind }: DebateMessage
               ? 'bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border border-emerald-500/20'
               : 'bg-gradient-to-br from-rose-500/10 to-rose-600/5 border border-rose-500/20'
           }`}>
-            <p className={`leading-relaxed ${
-              isBull ? 'text-slate-200' : 'text-slate-200'
-            }`}>
-              {message}
-            </p>
+            <p className="leading-relaxed text-slate-200 whitespace-pre-line">{message}</p>
           </div>
         </div>
       </div>

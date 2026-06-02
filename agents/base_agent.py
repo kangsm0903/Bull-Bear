@@ -14,7 +14,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI, RateLimitError
 
-from agents.config import MODEL_NAME, RETRY_ATTEMPTS, RETRY_WAIT_SECONDS
+from agents.config import MODEL_NAME, RETRY_ATTEMPTS, RETRY_WAIT_SECONDS, REASONING_EFFORT
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -46,17 +46,23 @@ class BaseAgent:
         GPT 호출 → JSON 응답 dict 반환.
         config.RETRY_ATTEMPTS에 따라 RateLimitError 재시도.
         """
+        # 추론 모델이면 reasoning_effort, 아니면 temperature 사용
+        kwargs: dict = {
+            "model": MODEL_NAME,
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        if REASONING_EFFORT:
+            kwargs["reasoning_effort"] = REASONING_EFFORT
+        else:
+            kwargs["temperature"] = temperature
+
         for attempt in range(RETRY_ATTEMPTS):
             try:
-                response = self.client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user",   "content": user_prompt},
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=temperature,
-                )
+                response = self.client.chat.completions.create(**kwargs)
                 raw = response.choices[0].message.content
                 try:
                     return json.loads(raw)

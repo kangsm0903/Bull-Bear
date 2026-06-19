@@ -118,9 +118,16 @@ def search(
     query_vec = np.array([embed_query(query)], dtype="float32")
     faiss.normalize_L2(query_vec)
 
-    # ticker 필터 또는 자동 감지 시 여유있게 검색 후 필터
-    detected_for_boost = _detect_ticker(query) if (auto_detect and not ticker) else None
-    search_k = top_k * 10 if (ticker or detected_for_boost) else top_k
+    # ticker 명시 또는 쿼리에서 회사명 자동 감지 → 해당 종목으로 한정.
+    detected = _detect_ticker(query) if (auto_detect and not ticker) else None
+    filter_ticker = ticker or detected
+
+    # 특정 종목으로 좁힐 땐 후보 풀을 넉넉히 잡는다.
+    # (FAISS는 메타데이터 필터를 지원하지 않아 검색 후 필터링하므로,
+    #  풀이 작으면 해당 종목 기사가 top_k만큼 안 잡혀 타사 기사가 섞인다.)
+    search_k = top_k
+    if filter_ticker:
+        search_k = min(max(top_k * 50, 300), index.ntotal)
     scores, faiss_ids = index.search(query_vec, search_k)
 
     valid_ids = [int(fid) for fid in faiss_ids[0] if fid >= 0]
@@ -136,16 +143,15 @@ def search(
     for r in results:
         r["score"] = score_map.get(r["faiss_id"], 0.0)
 
-    # ticker 필터링 (FAISS는 메타데이터 필터 미지원 → 검색 후 처리)
+    # 종목 필터링 (검색 후 처리)
     if ticker:
+        # 명시 종목: 엄격 필터 (해당 종목 기사만, 없으면 빈 결과)
         results = [r for r in results if r.get("ticker") == ticker]
-
-    # 회사명 자동 감지 → 해당 종목 결과를 상위로 부스팅
-    elif auto_detect and detected_for_boost:
-        detected = detected_for_boost
-        if detected:
-            matched = [r for r in results if r.get("ticker") == detected]
-            others  = [r for r in results if r.get("ticker") != detected]
-            results = matched + others
+    elif detected:
+        # 감지 종목: 해당 종목만 남김. 단 후보에 하나도 없으면
+        # 감지 오류로 보고 원본 의미검색 결과를 유지(안전장치).
+        matched = [r for r in results if r.get("ticker") == detected]
+        if matched:
+            results = matched
 
     return results[:top_k]

@@ -127,20 +127,75 @@ _FEW_SHOT_REBUT = f"""\
 {_FEW_SHOT_NOTICE}"""
 
 
-def _few_shot_argue(role: str) -> str:
-    if not ENABLE_FEW_SHOT:
-        return ""
-    return f"\n{_FEW_SHOT_ARGUE.get(role, '')}\n"
+# ── 입문자(beginner) 전용 쉬운 설명 버전 few-shot ──────────
+# 전문용어를 괄호로 풀이하고, 첫째/둘째 구조 + 일상어로 서술 (수치는 동일하게 데이터에서만 인용).
+_FEW_SHOT_ARGUE_PLAIN = {
+    "bull": f"""\
+━━━ 출력 예시 (쉬운 설명 버전 — 구조 참고용) ━━━
+[가정] 데이터에 [목표주가 상향], [영업이익 전망 상향] 정보가 있는 경우
+{{
+  "reasoning": "1. 데이터에서 [영업이익 [X]% 상향], [목표주가 [N]만원 상향] 확인. 2. 이익이 늘고 적정주가가 올랐으니 매수 근거. 3. 쉬운 말로 풀어서 전달.",
+  "content": "삼성전자는 지금 관심을 가질 만한 이유가 있습니다. 첫째, 회사가 벌 것으로 보이는 이익(영업이익)이 [X]% 늘었습니다. 이익이 늘면 보통 주가에도 긍정적입니다. 둘째, 증권사들이 보는 적정 주가(목표주가)가 [N]만원으로 올랐는데, 이는 지금 주가가 그보다 싸다는 뜻(저평가)입니다. 쉽게 말해 회사는 더 잘 벌고 있는데 주가는 아직 그만큼 따라오지 못한 상황입니다.",
+  "tags": ["이익 증가", "목표주가 상향", "저평가"]
+}}
+{_FEW_SHOT_NOTICE}""",
+
+    "bear": f"""\
+━━━ 출력 예시 (쉬운 설명 버전 — 구조 참고용) ━━━
+[가정] 데이터에 [고PER], [성장률 둔화] 정보가 있는 경우
+{{
+  "reasoning": "1. [PER [X]배(섹터 [Y]배)], [성장률 [A]%→[B]% 둔화] 확인. 2. 비싸고 성장 느려짐이 약점. 3. 쉬운 말로 전달.",
+  "content": "삼성전자는 지금 조심할 부분도 있습니다. 첫째, 주가가 이익에 비해 비싼 편입니다. 이익 대비 주가 수준을 보는 지표(PER)가 [X]배로, 비슷한 회사 평균 [Y]배보다 높습니다. 둘째, 매출이 느는 속도(성장률)가 [A]%에서 [B]%로 느려지고 있습니다. 쉽게 말해 가격은 비싼데 성장은 식고 있어 지금 사기엔 부담이 있습니다.",
+  "tags": ["비싼 주가", "성장 둔화", "부담"]
+}}
+{_FEW_SHOT_NOTICE}""",
+}
+
+_FEW_SHOT_REBUT_PLAIN = f"""\
+━━━ 출력 예시 (쉬운 설명 버전 — 구조 참고용) ━━━
+[가정] 상대가 [목표주가 상향]을 저평가 근거로 사용한 경우
+{{
+  "reasoning": "1. 상대는 [목표주가 상향]을 저평가 근거로 사용. 2. 목표주가는 예상치라 실제 도달 못 할 수 있음. 3. 쉬운 말로 반박.",
+  "content": "목표주가가 올랐다고 해서 꼭 싼 것은 아닙니다. 목표주가는 증권사의 '예상 가격'일 뿐인데, 데이터를 보면 실제로 그 가격에 도달한 비율(달성률)이 [X]%에 그칩니다. 쉽게 말해 기대만큼 오르지 못한 경우가 많았다는 뜻입니다. 따라서 목표주가가 올랐다는 사실만으로 싸다고 보긴 이릅니다.",
+  "tags": ["목표주가는 예상치", "낮은 달성률", "신중"]
+}}
+{_FEW_SHOT_NOTICE}"""
 
 
-def _few_shot_rebut() -> str:
+# 독자 등급 매핑 (few-shot 변형 선택용)
+PRESET_TIER = {"입문자": "beginner", "개인투자자": "intermediate", "전문가": "expert"}
+
+
+def resolve_persona_tier(user_persona: str = "", survey: dict | None = None) -> str:
+    """few-shot 변형 선택용 거친 등급. 설문이 있으면 규칙으로, 없으면 프리셋 키로 산출."""
+    if survey:
+        level = survey.get("level")
+        term  = survey.get("terminology")
+        depth = survey.get("depth")
+        if level == "입문자" or term == "낮음" or depth == "쉽고 간단":
+            return "beginner"
+        if level == "전문가" or term == "높음":
+            return "expert"
+        return "intermediate"
+    return PRESET_TIER.get(user_persona, "")
+
+
+def _few_shot_argue(role: str, persona_tier: str = "") -> str:
     if not ENABLE_FEW_SHOT:
         return ""
-    return f"\n{_FEW_SHOT_REBUT}\n"
+    examples = _FEW_SHOT_ARGUE_PLAIN if persona_tier == "beginner" else _FEW_SHOT_ARGUE
+    return f"\n{examples.get(role, '')}\n"
+
+
+def _few_shot_rebut(persona_tier: str = "") -> str:
+    if not ENABLE_FEW_SHOT:
+        return ""
+    example = _FEW_SHOT_REBUT_PLAIN if persona_tier == "beginner" else _FEW_SHOT_REBUT
+    return f"\n{example}\n"
 
 
 def _persona_block(user_persona: str) -> str:
-    """독자 프로필 블록 생성.
+    """독자 맞춤 작성 지침 블록 생성 (지시형).
 
     user_persona가 프리셋 키(입문자/개인투자자/전문가)면 해당 프로필로 확장하고,
     아니면 (설문→LLM으로 생성된) 자유형 프로필 문자열을 그대로 사용한다.
@@ -148,7 +203,22 @@ def _persona_block(user_persona: str) -> str:
     if not user_persona or not user_persona.strip():
         return ""
     profile = PERSONA_PROFILES.get(user_persona, user_persona).strip()
-    return f"\n━━━ 독자 프로필 ━━━\n{profile}\n"
+    return (
+        "\n━━━ 독자 맞춤 작성 지침 (필수) ━━━\n"
+        "아래 독자 수준에 맞춰 작성하세요. 투자 판단·근거·수치는 그대로 두되, "
+        "용어 풀이·설명 깊이·문장 난이도·톤만 이 수준에 맞추세요:\n"
+        f"{profile}\n"
+    )
+
+
+def _persona_directive(user_persona: str) -> str:
+    """지시부 끝에 붙는 페르소나 적용 리마인더 (페르소나 있을 때만)."""
+    if not user_persona or not user_persona.strip():
+        return ""
+    return (
+        "\n- 위 '독자 맞춤 작성 지침'에 맞춰 용어 풀이·설명 깊이·문장 난이도를 조절하세요. "
+        "(분석 내용·결론·수치는 독자와 무관하게 동일하게 유지)"
+    )
 
 
 def _tools_block(stance: str, action: str = "argue") -> str:
@@ -392,6 +462,7 @@ def build_argue_prompt(
     quant_text: str = "",
     memory_context: str = "",
     user_persona: str = "",
+    persona_tier: str = "",
 ) -> str:
     display = ROLE_META[role]["display"]
     stance  = ROLE_META[role]["stance"]
@@ -402,11 +473,11 @@ def build_argue_prompt(
 {_persona_block(user_persona)}{_memory_block(memory_context)}
 {_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "argue")}
 
-{_few_shot_argue(role)}━━━ 지시 ━━━
+{_few_shot_argue(role, persona_tier)}━━━ 지시 ━━━
 이번 라운드는 {_scope_text(round_num)}을 근거로 합니다.
 {_round_focus(round_num, stance)}
 - 반드시 위 데이터에서 구체적 수치/사실을 인용하여 논거를 뒷받침하세요.
-- 위 데이터에 없는 수치(주가, 수익률, 재무 지표 등)는 절대 사용하지 마세요.
+- 위 데이터에 없는 수치(주가, 수익률, 재무 지표 등)는 절대 사용하지 마세요.{_persona_directive(user_persona)}
 {_cot_block_argue(role, stance)}
 반드시 JSON 형식으로 응답하세요:
 {_output_format_argue()}"""
@@ -425,6 +496,7 @@ def build_rebut_prompt(
     quant_text: str = "",
     memory_context: str = "",
     user_persona: str = "",
+    persona_tier: str = "",
 ) -> str:
     display       = ROLE_META[role]["display"]
     stance        = ROLE_META[role]["stance"]
@@ -440,11 +512,11 @@ def build_rebut_prompt(
 
 {_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "rebut")}
 
-{_few_shot_rebut()}━━━ 지시 ━━━
+{_few_shot_rebut(persona_tier)}━━━ 지시 ━━━
 이번 라운드는 {_scope_text(round_num)}을 근거로 합니다.
 위 {opponent_disp}의 주장에 대해 {display}({stance}) 입장에서 반박하세요.
 - 반드시 상대 주장의 구체적 논점을 짚어 반박하세요.
-- 반박 근거는 위 데이터에서만 가져오세요.
+- 반박 근거는 위 데이터에서만 가져오세요.{_persona_directive(user_persona)}
 {_cot_block_rebut(opponent_disp, stance)}
 반드시 JSON 형식으로 응답하세요:
 {_output_format_rebut()}"""
@@ -509,7 +581,7 @@ def build_conclude_prompt(
 정성 데이터(뉴스)와 정량 데이터(재무/컨센서스/주가) 모두를 종합하여 {display}({stance}) 입장의 **최종 결론**을 제시하세요.
 - 핵심 논거를 압축적으로 정리하세요.
 - 데이터 근거를 명확히 드러내세요.
-- 4~6문장으로 결론을 명확하게.
+- 4~6문장으로 결론을 명확하게.{_persona_directive(user_persona)}
 
 반드시 JSON 형식으로 응답하세요:
 {{"content": "최종 결론", "tags": ["핵심 근거 1", "핵심 근거 2", "핵심 근거 3"]}}"""
@@ -569,7 +641,7 @@ def build_moderator_prompt(
 
 위 토론을 종합하여 최종 결론을 JSON 형식으로 제시하세요.
 투자 판단(verdict)은 반드시 다음 중 하나로 명시하세요:
-매수 적극 | 분할 매수 | 관망 | 매도 고려
+매수 적극 | 분할 매수 | 관망 | 매도 고려{_persona_directive(user_persona)}
 
 응답 형식:
 {{

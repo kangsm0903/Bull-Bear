@@ -141,6 +141,7 @@ class AnalystAgent(BaseAgent):
         quant_text: str = "",
         memory_context: str = "",
         user_persona: str = "",
+        persona_tier: str = "",
     ) -> dict:
         prompt = build_argue_prompt(
             role=self.role,
@@ -151,6 +152,7 @@ class AnalystAgent(BaseAgent):
             quant_text=quant_text,
             memory_context=memory_context,
             user_persona=user_persona,
+            persona_tier=persona_tier,
         )
         draft, articles = self._run_llm(prompt, TEMPERATURE["argue"], can_top_up=False)
         result = self._reflect(draft, prompt)
@@ -167,6 +169,7 @@ class AnalystAgent(BaseAgent):
         quant_text: str = "",
         memory_context: str = "",
         user_persona: str = "",
+        persona_tier: str = "",
     ) -> dict:
         prompt = build_rebut_prompt(
             role=self.role,
@@ -178,6 +181,7 @@ class AnalystAgent(BaseAgent):
             quant_text=quant_text,
             memory_context=memory_context,
             user_persona=user_persona,
+            persona_tier=persona_tier,
         )
         draft, articles = self._run_llm(prompt, TEMPERATURE["rebut"], can_top_up=True)
         result = self._reflect(draft, prompt)
@@ -218,14 +222,15 @@ class AnalystAgent(BaseAgent):
         opponent_statement: str = "",
         memory_context: str = "",
         user_persona: str = "",
+        persona_tier: str = "",
     ) -> dict:
         if action == "argue":
             return self.argue(topic, round_num, articles_common, articles_side,
-                              quant_text, memory_context, user_persona)
+                              quant_text, memory_context, user_persona, persona_tier)
         if action == "rebut":
             return self.rebut(topic, round_num, opponent_statement,
                               articles_common, articles_side, quant_text,
-                              memory_context, user_persona)
+                              memory_context, user_persona, persona_tier)
         if action == "conclude":
             return self.conclude(topic, articles_common, articles_side,
                                  quant_text, memory_context, user_persona)

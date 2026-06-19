@@ -30,6 +30,7 @@ from agents.config import (
     TOP_K_SIDE,
     TOOL_MAX_ARTICLES_PER_SIDE,
 )
+from agents.prompts import resolve_persona_tier
 from agents.query_expander import expand_query
 from rag.retriever import search, _detect_ticker
 from rag.quant_fetcher import fetch_quant, format_quant
@@ -59,6 +60,11 @@ class DebateOrchestrator:
             user_persona = self.profiler.profile(survey)
             if user_persona:
                 print("  [Profiler] 설문 기반 독자 프로필 생성 완료")
+
+        # few-shot 변형 선택용 독자 등급 (설문 규칙 → 없으면 프리셋 키)
+        persona_tier = resolve_persona_tier(user_persona, survey)
+        if persona_tier:
+            print(f"  [Persona] tier = {persona_tier}")
 
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
@@ -104,6 +110,7 @@ class DebateOrchestrator:
                 quant_text=quant_text,
                 memory_context=memory_context,
                 user_persona=user_persona,
+                persona_tier=persona_tier,
                 on_round_complete=on_round_complete,
             )
         else:
@@ -117,6 +124,7 @@ class DebateOrchestrator:
                     quant_text=quant_text,
                     memory_context=memory_context,
                     user_persona=user_persona,
+                    persona_tier=persona_tier,
                 )
                 all_rounds.append(round_msgs)
                 if on_round_complete:
@@ -178,6 +186,7 @@ class DebateOrchestrator:
         quant_text: str,
         memory_context: str = "",
         user_persona: str = "",
+        persona_tier: str = "",
     ) -> list[dict]:
         """한 라운드 실행. 의존성 레벨별로 병렬 호출."""
         round_num = round_cfg["round"]
@@ -208,6 +217,7 @@ class DebateOrchestrator:
                 opponent_statement=opponent_statement,
                 memory_context=memory_context,
                 user_persona=user_persona,
+                persona_tier=persona_tier,
             )
 
         # 의존성 레벨 계산
@@ -241,6 +251,7 @@ class DebateOrchestrator:
         quant_text: str,
         memory_context: str,
         user_persona: str,
+        persona_tier: str = "",
         on_round_complete=None,
     ) -> list[list[dict]]:
         """
@@ -266,6 +277,7 @@ class DebateOrchestrator:
                 quant_text=quant_text,
                 memory_context=memory_context,
                 user_persona=user_persona,
+                persona_tier=persona_tier,
             )
             all_rounds.append(round_msgs)
             if on_round_complete:

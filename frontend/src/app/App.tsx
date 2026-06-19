@@ -1,5 +1,6 @@
 import { useState, useEffect, Component, type ReactNode, type ErrorInfo } from 'react';
 import { InputScreen } from './components/InputScreen';
+import type { Survey } from './components/InputScreen';
 import { LoadingScreen } from './components/LoadingScreen';
 import { DebateChat } from './components/DebateChat';
 import type { DebateData } from './components/DebateChat';
@@ -63,7 +64,7 @@ export default function App() {
 
   useGlobalErrorCatcher(setGlobalError);
 
-  const handleStartDebate = async (topic: string) => {
+  const handleStartDebate = async (topic: string, survey: Survey) => {
     setIsLoading(true);
     setDebateTopic(topic);
     setError(null);
@@ -72,7 +73,7 @@ export default function App() {
       const res = await fetch('/api/debate', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ topic }),
+        body:    JSON.stringify({ topic, survey }),
       });
 
       if (!res.ok) throw new Error(`서버 오류: ${res.status}`);

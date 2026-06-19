@@ -16,8 +16,20 @@ agents/orchestrator.py — 토론 흐름 실행 엔진
 from concurrent.futures import ThreadPoolExecutor
 
 from agents.analyst import AnalystAgent
+from agents.memory import DebateMemory
 from agents.moderator import ModeratorAgent
-from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE
+from agents.profiler import ProfilerAgent
+from agents.config import (
+    DEBATE_FLOW,
+    ENABLE_DYNAMIC_ROUNDS,
+    ENABLE_TOOL_CALLING,
+    FREE_DEBATE_ROUND,
+    MAX_DEBATE_ROUNDS,
+    RESEARCH_MODE,
+    TOP_K_COMMON,
+    TOP_K_SIDE,
+    TOOL_MAX_ARTICLES_PER_SIDE,
+)
 from agents.query_expander import expand_query
 from rag.retriever import search, _detect_ticker
 from rag.quant_fetcher import fetch_quant, format_quant
@@ -31,39 +43,86 @@ class DebateOrchestrator:
             "bear": AnalystAgent("bear"),
         }
         self.moderator = ModeratorAgent()
+        self.profiler = ProfilerAgent()
+        self.memory = DebateMemory()
 
     # ─────────────────────────────────────────────────────
-    def run(self, topic: str, on_round_complete=None) -> dict:
+    def run(
+        self,
+        topic: str,
+        on_round_complete=None,
+        user_persona: str = "",
+        survey: dict | None = None,
+    ) -> dict:
+        # ── 0. 설문 → 독자 프로필 생성 (설문이 있고 명시 페르소나가 없을 때) ──
+        if survey and not user_persona:
+            user_persona = self.profiler.profile(survey)
+            if user_persona:
+                print("  [Profiler] 설문 기반 독자 프로필 생성 완료")
+
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
         articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON)
-        articles_bull   = search(queries["bull"],   source="articles", top_k=TOP_K_SIDE)
-        articles_bear   = search(queries["bear"],   source="articles", top_k=TOP_K_SIDE)
 
         detected_ticker = _detect_ticker(topic)
         quant_data = fetch_quant(detected_ticker) if detected_ticker else None
         quant_text = format_quant(quant_data) if quant_data else ""
 
-        articles_by_side = {
-            "bull": articles_bull,
-            "bear": articles_bear,
-        }
+        # side 기사 출처 (조사 방식에 따라 달라짐):
+        #   per_step : 각 발언에서 직접 조사하므로 여기선 빈 채로 둔다.
+        #   upfront  : 토론 전 각 측이 1회 통합 조사 (메모리 검색 후 아래에서 채움).
+        #   OFF      : 기존처럼 스탠스별 기사를 미리 검색해 떠먹여준다 (off-path 호환).
+        if ENABLE_TOOL_CALLING:
+            articles_by_side = {"bull": [], "bear": []}
+        else:
+            articles_by_side = {
+                "bull": search(queries["bull"], source="articles", top_k=TOP_K_SIDE),
+                "bear": search(queries["bear"], source="articles", top_k=TOP_K_SIDE),
+            }
 
-        # ── 2. 라운드별 실행 ──────────────────────────
-        all_rounds: list[list[dict]] = []
-        for round_cfg in DEBATE_FLOW:
-            round_msgs = self._run_round(
-                round_cfg=round_cfg,
+        # ── 2. 메모리 검색 ────────────────────────────
+        past_debates = self.memory.search(ticker=detected_ticker or "", topic=topic)
+        memory_context = self.memory.format(past_debates)
+        if past_debates:
+            print(f"  [Memory] 과거 토론 {len(past_debates)}건 참조")
+
+        # upfront/hybrid 모드: 토론 전 각 측이 자기 입장 근거를 1회 통합 조사.
+        if ENABLE_TOOL_CALLING and RESEARCH_MODE in ("upfront", "hybrid"):
+            articles_by_side = self._run_upfront_research(
+                topic=topic,
+                articles_common=articles_common,
+                quant_text=quant_text,
+                memory_context=memory_context,
+            )
+
+        # ── 3. 라운드별 실행 ──────────────────────────
+        if ENABLE_DYNAMIC_ROUNDS:
+            all_rounds = self._run_dynamic_rounds(
                 topic=topic,
                 articles_common=articles_common,
                 articles_by_side=articles_by_side,
                 quant_text=quant_text,
+                memory_context=memory_context,
+                user_persona=user_persona,
+                on_round_complete=on_round_complete,
             )
-            all_rounds.append(round_msgs)
-            if on_round_complete:
-                on_round_complete(round_cfg["round"], round_msgs)
+        else:
+            all_rounds = []
+            for round_cfg in DEBATE_FLOW:
+                round_msgs = self._run_round(
+                    round_cfg=round_cfg,
+                    topic=topic,
+                    articles_common=articles_common,
+                    articles_by_side=articles_by_side,
+                    quant_text=quant_text,
+                    memory_context=memory_context,
+                    user_persona=user_persona,
+                )
+                all_rounds.append(round_msgs)
+                if on_round_complete:
+                    on_round_complete(round_cfg["round"], round_msgs)
 
-        # ── 3. Moderator 결론 ─────────────────────────
+        # ── 4. Moderator 결론 ─────────────────────────
         moderator_history = [
             {"round": m["round"], "role": m["role"].capitalize(), "content": m["content"]}
             for round_msgs in all_rounds for m in round_msgs
@@ -72,7 +131,31 @@ class DebateOrchestrator:
             topic=topic,
             debate_history=moderator_history,
             articles_common=articles_common,
+            user_persona=user_persona,
         )
+
+        # ── 5. 메모리 저장 ────────────────────────────
+        self.memory.save(
+            topic=topic,
+            ticker=detected_ticker or "",
+            moderator_result=moderator_result,
+        )
+
+        # ── 6. 페르소나 설정 시 면책 고지 주입 ──
+        # (역할 레이블 _inject_context는 UI 말풍선/CLI가 이미 Bull/Bear를 표시해 중복이므로 호출하지 않음)
+        if user_persona:
+            moderator_result = _inject_disclaimer(moderator_result)
+
+        # 사이드바용 side 기사:
+        #   per_step : 라운드 step들에서 조사한 기사를 모아 중복 제거.
+        #   hybrid   : upfront 사전 조사 + 발언 중 추가 조사를 병합.
+        #   upfront/OFF : 이미 articles_by_side에 채워진 기사를 그대로 사용.
+        if ENABLE_TOOL_CALLING and RESEARCH_MODE == "per_step":
+            side_articles = _collect_researched(all_rounds)
+        elif ENABLE_TOOL_CALLING and RESEARCH_MODE == "hybrid":
+            side_articles = _merge_sides(articles_by_side, _collect_researched(all_rounds))
+        else:
+            side_articles = articles_by_side
 
         return {
             "topic": topic,
@@ -80,8 +163,8 @@ class DebateOrchestrator:
             "moderator": moderator_result,
             "articles": {
                 "common": articles_common,
-                "bull":   articles_bull,
-                "bear":   articles_bear,
+                "bull":   side_articles["bull"],
+                "bear":   side_articles["bear"],
             },
         }
 
@@ -93,6 +176,8 @@ class DebateOrchestrator:
         articles_common: list[dict],
         articles_by_side: dict[str, list[dict]],
         quant_text: str,
+        memory_context: str = "",
+        user_persona: str = "",
     ) -> list[dict]:
         """한 라운드 실행. 의존성 레벨별로 병렬 호출."""
         round_num = round_cfg["round"]
@@ -121,6 +206,8 @@ class DebateOrchestrator:
                 articles_side=articles_by_side[role] if use_articles else [],
                 quant_text=eff_quant_text,
                 opponent_statement=opponent_statement,
+                memory_context=memory_context,
+                user_persona=user_persona,
             )
 
         # 의존성 레벨 계산
@@ -144,10 +231,117 @@ class DebateOrchestrator:
             for i in range(len(steps))
         ]
 
+    # ─────────────────────────────────────────────────────
+    def _run_dynamic_rounds(
+        self,
+        *,
+        topic: str,
+        articles_common: list[dict],
+        articles_by_side: dict[str, list[dict]],
+        quant_text: str,
+        memory_context: str,
+        user_persona: str,
+        on_round_complete=None,
+    ) -> list[list[dict]]:
+        """
+        동적 라운드 실행:
+          1. 고정 토론 라운드(정성 → 정량)를 먼저 실행.
+          2. 수렴 판정이 '미수렴'이면 자유 토론 라운드를 MAX_DEBATE_ROUNDS 한도까지 반복.
+          3. 마지막에 결론 라운드를 실행.
+        """
+        debate_rounds   = [r for r in DEBATE_FLOW if not _is_conclude_round(r)]
+        conclude_rounds = [r for r in DEBATE_FLOW if _is_conclude_round(r)]
+
+        all_rounds: list[list[dict]] = []
+        num = 0
+
+        def run_and_collect(round_cfg: dict) -> None:
+            nonlocal num
+            num += 1
+            round_msgs = self._run_round(
+                round_cfg={**round_cfg, "round": num},
+                topic=topic,
+                articles_common=articles_common,
+                articles_by_side=articles_by_side,
+                quant_text=quant_text,
+                memory_context=memory_context,
+                user_persona=user_persona,
+            )
+            all_rounds.append(round_msgs)
+            if on_round_complete:
+                on_round_complete(num, round_msgs)
+
+        # 1) 고정 토론 라운드 (정성 → 정량)
+        for round_cfg in debate_rounds:
+            run_and_collect(round_cfg)
+
+        # 2) 수렴 판정 → 미수렴이면 자유 토론 라운드 반복 (상한 MAX_DEBATE_ROUNDS)
+        for _ in range(MAX_DEBATE_ROUNDS):
+            verdict = self.moderator.check_convergence(topic, _flatten_history(all_rounds))
+            status = "수렴(종료)" if verdict["converged"] else "미수렴(연장)"
+            print(f"  [Convergence] R{num} 후 → {status} | {verdict.get('reason', '')}")
+            if verdict["converged"]:
+                break
+            run_and_collect(FREE_DEBATE_ROUND)
+
+        # 3) 결론 라운드
+        for round_cfg in conclude_rounds:
+            run_and_collect(round_cfg)
+
+        return all_rounds
+
+    # ─────────────────────────────────────────────────────
+    def _run_upfront_research(
+        self,
+        *,
+        topic: str,
+        articles_common: list[dict],
+        quant_text: str,
+        memory_context: str,
+    ) -> dict[str, list[dict]]:
+        """upfront 모드: bull/bear가 각자 1회 통합 조사 (병렬). url/title 기준 중복 제거 + 상한."""
+        def do_research(role: str) -> list[dict]:
+            return self.agents[role].research(
+                topic=topic,
+                articles_common=articles_common,
+                quant_text=quant_text,
+                memory_context=memory_context,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            futures = {ex.submit(do_research, role): role for role in ("bull", "bear")}
+            raw = {futures[f]: f.result() for f in futures}
+
+        result: dict[str, list[dict]] = {}
+        for role, articles in raw.items():
+            seen: set = set()
+            deduped: list[dict] = []
+            for a in articles:
+                key = a.get("url") or a.get("title")
+                if key and key not in seen:
+                    seen.add(key)
+                    deduped.append(a)
+                if len(deduped) >= TOOL_MAX_ARTICLES_PER_SIDE:
+                    break
+            result[role] = deduped
+            print(f"  [Upfront research] {role.upper()} → {len(deduped)}건 조사")
+        return result
+
 
 # ═════════════════════════════════════════════════════════
 # 내부 헬퍼
 # ═════════════════════════════════════════════════════════
+def _is_conclude_round(round_cfg: dict) -> bool:
+    """모든 step의 action이 conclude면 결론 라운드."""
+    return all(s["action"] == "conclude" for s in round_cfg["steps"])
+
+
+def _flatten_history(all_rounds: list[list[dict]]) -> list[dict]:
+    """수렴 판정용: 라운드별 메시지 리스트를 평탄화."""
+    return [
+        {"round": m["round"], "role": m["role"].capitalize(), "content": m["content"]}
+        for round_msgs in all_rounds for m in round_msgs
+    ]
 def _find_step(steps: list[dict], target_role: str, target_action: str) -> int | None:
     """주어진 (role, action)에 매칭되는 step의 index 반환."""
     for i, s in enumerate(steps):
@@ -185,4 +379,77 @@ def _to_message(round_num: int, step: dict, result: dict) -> dict:
         "kind":    step["action"],        # 'argue' | 'rebut' | 'conclude'
         "content": result.get("content", ""),
         "tags":    result.get("tags", []),
+        "researched_articles": result.get("researched_articles", []),
     }
+
+
+def _collect_researched(all_rounds: list[list[dict]]) -> dict[str, list[dict]]:
+    """라운드 전체에서 bull/bear가 조사한 기사를 모아 url(또는 title) 기준 중복 제거."""
+    by_side: dict[str, list[dict]] = {"bull": [], "bear": []}
+    seen: dict[str, set] = {"bull": set(), "bear": set()}
+    for round_msgs in all_rounds:
+        for m in round_msgs:
+            role = m.get("role")
+            if role not in by_side:
+                continue
+            if len(by_side[role]) >= TOOL_MAX_ARTICLES_PER_SIDE:
+                continue
+            for a in m.get("researched_articles", []):
+                key = a.get("url") or a.get("title")
+                if key and key not in seen[role]:
+                    seen[role].add(key)
+                    by_side[role].append(a)
+                    if len(by_side[role]) >= TOOL_MAX_ARTICLES_PER_SIDE:
+                        break
+    return by_side
+
+
+def _merge_sides(*side_dicts: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """여러 {bull/bear: [기사]} dict를 role별로 합치고 url(또는 title) 기준 중복 제거 + 상한."""
+    merged: dict[str, list[dict]] = {"bull": [], "bear": []}
+    for role in merged:
+        seen: set = set()
+        for d in side_dicts:
+            for a in d.get(role, []):
+                key = a.get("url") or a.get("title")
+                if key and key not in seen:
+                    seen.add(key)
+                    merged[role].append(a)
+                if len(merged[role]) >= TOOL_MAX_ARTICLES_PER_SIDE:
+                    break
+    return merged
+
+
+_ROLE_LABEL = {
+    "bull": "[매수(Bull) 측 주장]",
+    "bear": "[매도(Bear) 측 주장]",
+}
+
+DISCLAIMER = (
+    "※ 본 분석은 AI가 생성한 참고 자료입니다. "
+    "위 내용은 매수/매도 양측의 주장을 각각 제시한 것이며, "
+    "투자 결정의 최종 책임은 본인에게 있습니다."
+)
+
+
+def _inject_context(all_rounds: list[list[dict]]) -> list[list[dict]]:
+    """각 메시지 content 앞에 역할 맥락 레이블을 붙인다."""
+    result = []
+    for round_msgs in all_rounds:
+        new_msgs = []
+        for msg in round_msgs:
+            label = _ROLE_LABEL.get(msg["role"], "")
+            new_msg = dict(msg)
+            if label:
+                new_msg["content"] = f"{label}\n{msg['content']}"
+            new_msgs.append(new_msg)
+        result.append(new_msgs)
+    return result
+
+
+def _inject_disclaimer(moderator_result: dict) -> dict:
+    """moderator 결론 뒤에 면책 고지를 추가한다."""
+    result = dict(moderator_result)
+    conclusion = result.get("conclusion", "")
+    result["conclusion"] = f"{conclusion}\n\n{DISCLAIMER}"
+    return result

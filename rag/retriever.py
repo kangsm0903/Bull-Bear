@@ -36,12 +36,16 @@ def _get_corp_map() -> dict[str, str]:
 
 
 def _detect_ticker(query: str) -> str | None:
-    """쿼리에서 회사명을 감지해 ticker 반환. 못 찾으면 None."""
+    """쿼리에서 회사명을 감지해 ticker 반환. 못 찾으면 None.
+
+    여러 회사명이 부분 문자열로 걸리면 가장 긴(=구체적인) 이름을 우선한다.
+    (예: 'SK하이닉스'가 'SK'를 이김 — 짧은 종목명의 오매칭 방지)
+    """
     corp_map = _get_corp_map()
-    for corp_name, ticker in corp_map.items():
-        if corp_name in query:
-            return ticker
-    return None
+    matches = [(name, ticker) for name, ticker in corp_map.items() if name in query]
+    if not matches:
+        return None
+    return max(matches, key=lambda nt: len(nt[0]))[1]
 
 
 def _load_index(source: str) -> faiss.Index:

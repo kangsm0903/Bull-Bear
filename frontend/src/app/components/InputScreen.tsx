@@ -1,13 +1,36 @@
 import { useState } from 'react';
 import { TrendingUp, TrendingDown, Search } from 'lucide-react';
 
-interface InputScreenProps {
-  onStartDebate: (topic: string) => void;
+export interface Survey {
+  gender?: string;
+  age?: string;
+  experience?: string;
+  level?: string;
+  terminology?: string;
+  depth?: string;
 }
+
+interface InputScreenProps {
+  onStartDebate: (topic: string, survey: Survey) => void;
+}
+
+const SURVEY_QUESTIONS: { field: keyof Survey; label: string; options: string[] }[] = [
+  { field: 'gender',      label: '성별',      options: ['남성', '여성', '응답 안 함'] },
+  { field: 'age',         label: '나이대',    options: ['20대 이하', '30대', '40대', '50대 이상'] },
+  { field: 'experience',  label: '투자 기간', options: ['1년 미만', '1~3년', '3~7년', '7년 이상'] },
+  { field: 'level',       label: '개인 수준', options: ['입문자', '개인투자자', '전문가'] },
+  { field: 'terminology', label: '용어 숙지', options: ['낮음', '보통', '높음'] },
+  { field: 'depth',       label: '설명 깊이', options: ['쉽고 간단', '균형', '심층·정밀'] },
+];
 
 export function InputScreen({ onStartDebate }: InputScreenProps) {
   const [topic, setTopic] = useState('');
   const [focusedExample, setFocusedExample] = useState<number | null>(null);
+  const [survey, setSurvey] = useState<Survey>({});
+
+  const toggleField = (field: keyof Survey, value: string) => {
+    setSurvey((prev) => ({ ...prev, [field]: prev[field] === value ? undefined : value }));
+  };
 
   const exampleTopics = [
     { ticker: '005930', name: '삼성전자',   topic: 'HBM·파운드리 수익성 회복 가능성',  sentiment: 'bullish' },
@@ -19,7 +42,7 @@ export function InputScreen({ onStartDebate }: InputScreenProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (topic.trim()) {
-      onStartDebate(topic.trim());
+      onStartDebate(topic.trim(), survey);
     }
   };
 
@@ -97,6 +120,43 @@ export function InputScreen({ onStartDebate }: InputScreenProps) {
                     Analyze
                   </button>
                 )}
+              </div>
+            </div>
+
+            {/* Reader Profile Survey (optional) */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+                  독자 프로필 <span className="text-slate-600 normal-case">(선택 — 답변 수준이 맞춰집니다)</span>
+                </p>
+                <div className="h-px flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 p-5 bg-white/5 border border-white/10 rounded-xl">
+                {SURVEY_QUESTIONS.map((q) => (
+                  <div key={q.field} className="space-y-2">
+                    <p className="text-xs text-slate-500">{q.label}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {q.options.map((opt) => {
+                        const selected = survey[q.field] === opt;
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => toggleField(q.field, opt)}
+                            className={`px-3 py-1.5 rounded-lg text-sm transition-all border ${
+                              selected
+                                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                                : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-300'
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

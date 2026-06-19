@@ -35,12 +35,13 @@ app.add_middleware(
 
 class DebateRequest(BaseModel):
     topic: str
+    survey: dict | None = None   # 설문 응답 {gender, age, experience, level, terminology, depth}
 
 
 @app.post("/api/debate")
 def run_debate(req: DebateRequest):
     orchestrator = DebateOrchestrator()
-    result = orchestrator.run(topic=req.topic)
+    result = orchestrator.run(topic=req.topic, survey=req.survey)
 
     now = datetime.now().strftime("%I:%M %p")
 

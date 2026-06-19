@@ -11,13 +11,35 @@ Bull과 Bear는 system_prompt와 입력 데이터만 다르고 호출 구조가 
 """
 
 from agents.base_agent import BaseAgent
-from agents.config import TEMPERATURE
+from agents.config import (
+    ENABLE_COT,
+    ENABLE_REFLECTION,
+    ENABLE_TOOL_CALLING,
+    RESEARCH_MODE,
+    ROLE_META,
+    TEMPERATURE,
+)
+from agents.tools import TOOL_SCHEMAS, cache_key, dispatch
 from agents.prompts import (
     SYSTEM_PROMPTS,
     build_argue_prompt,
-    build_rebut_prompt,
     build_conclude_prompt,
+    build_rebut_prompt,
+    build_reflection_prompt,
+    build_research_prompt,
 )
+
+
+def _with_research_context(prompt: str, research_text: str) -> str:
+    research_block = research_text.strip() if research_text.strip() else "(추가 리서치 결과 없음)"
+    return f"""{prompt}
+
+━━━ 사전 리서치 결과 ━━━
+{research_block}
+
+━━━ 최종 발언 작성 지시 ━━━
+리서치 단계는 종료되었습니다. 이제 도구를 호출하지 말고 최종 JSON 답변만 작성하세요.
+근거는 위 원데이터와 사전 리서치 결과에서 확인되는 사실만 사용하세요."""
 
 
 class AnalystAgent(BaseAgent):
@@ -33,6 +55,82 @@ class AnalystAgent(BaseAgent):
     def system_prompt(self) -> str:
         return SYSTEM_PROMPTS[self.role]
 
+    # ── 사전 통합 조사 (upfront 모드 전용) ──────────────
+    def research(
+        self,
+        topic: str,
+        articles_common: list[dict],
+        quant_text: str = "",
+        memory_context: str = "",
+    ) -> list[dict]:
+        """토론 시작 전 자기 입장 근거를 한 번에 조사해 기사 리스트를 반환.
+
+        조사 결과 기사는 이후 라운드에 articles_side로 주입되어 재사용된다.
+        (정량 등 텍스트 결과는 라운드의 quant_text/공통 데이터로 충분하므로 버린다.)
+        """
+        prompt = build_research_prompt(
+            role=self.role,
+            topic=topic,
+            articles_common=articles_common,
+            quant_text=quant_text,
+            memory_context=memory_context,
+        )
+        _text, articles = self._research_with_tools(
+            prompt, TOOL_SCHEMAS, dispatch, cache_key,
+        )
+        return articles
+
+    # ── LLM 호출 (조사 방식 분기) ───────────────────────
+    def _run_llm(self, prompt: str, temperature: float, can_top_up: bool = False) -> tuple[dict, list]:
+        """조사 방식에 따라 발언 전 조사 여부를 결정한 뒤 최종 답변 생성.
+
+        - per_step: 모든 발언에서 (필수) 조사.
+        - hybrid:   argue는 사전 조사 근거만 사용(can_top_up=False), rebut만 추가 조사(can_top_up=True).
+        - upfront/OFF: 발언 중 조사 없음. 근거는 이미 articles_side로 프롬프트에 들어있음.
+        반환: (draft dict, 이 발언에서 조사한 기사 리스트).
+        """
+        do_research = ENABLE_TOOL_CALLING and (
+            RESEARCH_MODE == "per_step"
+            or (RESEARCH_MODE == "hybrid" and can_top_up)
+        )
+        if do_research:
+            research_text, articles = self._research_with_tools(
+                prompt,
+                TOOL_SCHEMAS,
+                dispatch,
+                cache_key,
+                temperature=temperature,
+            )
+            final_prompt = _with_research_context(prompt, research_text)
+            return self._chat(final_prompt, temperature=temperature), articles
+        return self._chat(prompt, temperature=temperature), []
+
+    # ── Self-Reflection ──────────────────────────────────
+    def _reflect(self, draft: dict, input_prompt: str) -> dict:
+        """초안을 자기 검토하고, 문제가 있으면 수정한 뒤 반환."""
+        if not ENABLE_REFLECTION:
+            return draft
+
+        stance = ROLE_META[self.role]["stance"]
+        ref_prompt = build_reflection_prompt(
+            role=self.role,
+            stance=stance,
+            draft=draft.get("content", ""),
+            input_prompt=input_prompt,
+        )
+        result = self._chat(ref_prompt, temperature=TEMPERATURE["reflect"])
+
+        verdict = result.get("verdict", "OK")
+        print(f"  [Reflection] {self.role.upper()} → {verdict}"
+              + (f" | issues: {result.get('issues', [])}" if verdict == "REVISE" else ""))
+
+        return {
+            "content":    result.get("content", draft.get("content", "")),
+            "tags":       result.get("tags", draft.get("tags", [])),
+            "reasoning":  draft.get("reasoning", ""),
+            "reflection": {"verdict": verdict, "issues": result.get("issues", [])},
+        }
+
     # ── 액션 메서드 ─────────────────────────────────────
     def argue(
         self,
@@ -41,6 +139,8 @@ class AnalystAgent(BaseAgent):
         articles_common: list[dict],
         articles_side: list[dict],
         quant_text: str = "",
+        memory_context: str = "",
+        user_persona: str = "",
     ) -> dict:
         prompt = build_argue_prompt(
             role=self.role,
@@ -49,8 +149,13 @@ class AnalystAgent(BaseAgent):
             articles_common=articles_common,
             articles_side=articles_side,
             quant_text=quant_text,
+            memory_context=memory_context,
+            user_persona=user_persona,
         )
-        return self._chat(prompt, temperature=TEMPERATURE["argue"])
+        draft, articles = self._run_llm(prompt, TEMPERATURE["argue"], can_top_up=False)
+        result = self._reflect(draft, prompt)
+        result["researched_articles"] = articles
+        return result
 
     def rebut(
         self,
@@ -60,6 +165,8 @@ class AnalystAgent(BaseAgent):
         articles_common: list[dict],
         articles_side: list[dict],
         quant_text: str = "",
+        memory_context: str = "",
+        user_persona: str = "",
     ) -> dict:
         prompt = build_rebut_prompt(
             role=self.role,
@@ -69,8 +176,13 @@ class AnalystAgent(BaseAgent):
             articles_common=articles_common,
             articles_side=articles_side,
             quant_text=quant_text,
+            memory_context=memory_context,
+            user_persona=user_persona,
         )
-        return self._chat(prompt, temperature=TEMPERATURE["rebut"])
+        draft, articles = self._run_llm(prompt, TEMPERATURE["rebut"], can_top_up=True)
+        result = self._reflect(draft, prompt)
+        result["researched_articles"] = articles
+        return result
 
     def conclude(
         self,
@@ -78,6 +190,8 @@ class AnalystAgent(BaseAgent):
         articles_common: list[dict],
         articles_side: list[dict],
         quant_text: str,
+        memory_context: str = "",
+        user_persona: str = "",
     ) -> dict:
         prompt = build_conclude_prompt(
             role=self.role,
@@ -85,8 +199,11 @@ class AnalystAgent(BaseAgent):
             articles_common=articles_common,
             articles_side=articles_side,
             quant_text=quant_text,
+            memory_context=memory_context,
+            user_persona=user_persona,
         )
-        return self._chat(prompt, temperature=TEMPERATURE["conclude"])
+        draft = self._chat(prompt, temperature=TEMPERATURE["conclude"])
+        return self._reflect(draft, prompt)
 
     # ── action 이름으로 디스패치 (orchestrator가 사용) ─
     def run_action(
@@ -99,12 +216,17 @@ class AnalystAgent(BaseAgent):
         articles_side: list[dict],
         quant_text: str,
         opponent_statement: str = "",
+        memory_context: str = "",
+        user_persona: str = "",
     ) -> dict:
         if action == "argue":
-            return self.argue(topic, round_num, articles_common, articles_side, quant_text)
+            return self.argue(topic, round_num, articles_common, articles_side,
+                              quant_text, memory_context, user_persona)
         if action == "rebut":
             return self.rebut(topic, round_num, opponent_statement,
-                              articles_common, articles_side, quant_text)
+                              articles_common, articles_side, quant_text,
+                              memory_context, user_persona)
         if action == "conclude":
-            return self.conclude(topic, articles_common, articles_side, quant_text)
+            return self.conclude(topic, articles_common, articles_side,
+                                 quant_text, memory_context, user_persona)
         raise ValueError(f"Unknown action: {action}")

@@ -1,9 +1,5 @@
 """
-FAISS 검색 → SQLite 메타데이터 조회
-
-사용 예:
-    from rag.retriever import search
-    results = search("삼성전자 반도체 수익성", source="articles", top_k=5)
+종목 인식 + 별칭
 """
 
 import sqlite3
@@ -13,6 +9,7 @@ import faiss
 import numpy as np
 
 from rag.embedder import embed_query
+from rag.sentiment import sentiment_score
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "identifier.sqlite"
@@ -26,7 +23,7 @@ _corp_map: dict[str, str] = {}
 
 
 def _get_corp_map() -> dict[str, str]:
-    """DB에서 회사명 → ticker 매핑 로드 (캐시)"""
+    """DB에서 {corp_name, ticker} 뽑아냄"""
     global _corp_map
     if not _corp_map:
         with sqlite3.connect(DB_PATH) as conn:
@@ -72,6 +69,25 @@ MARKET_NOISE_KEYWORDS = [
 # 그룹 접두사 — 제거해 별칭 생성 (예: "SK하이닉스" → "하이닉스")
 GROUP_PREFIXES = ("SK", "LG", "GS", "CJ", "KT", "NH", "DB", "HD", "DL", "POSCO")
 
+# 수동 별칭 맵 — 기사 제목/검색어 표기가 정식 종목명과 다른 종목 (영문↔한글·약칭)
+# ✏️ 무관 기사가 많은 종목을 발견하면 여기에 추가하세요.
+MANUAL_ALIASES = {
+    "삼성에스디에스":  ["삼성SDS"],
+    "POSCO홀딩스":    ["포스코", "POSCO"],
+    "POSCO퓨처엠":    ["포스코퓨처엠", "포스코"],
+    "NAVER":         ["네이버"],
+    "S-Oil":         ["에쓰오일", "S오일"],
+    "LS ELECTRIC":   ["LS일렉트릭", "LS일렉", "LS산전"],
+    "신한지주":       ["신한금융", "신한은행"],
+    "BNK금융지주":    ["BNK금융", "부산은행", "경남은행"],
+    "iM금융지주":     ["iM뱅크", "iM금융", "DGB금융"],
+    "메리츠금융지주":  ["메리츠금융", "메리츠증권", "메리츠화재"],
+    "JB금융지주":     ["JB금융", "전북은행", "광주은행"],
+    "우리금융지주":    ["우리금융", "우리은행"],
+    "하나금융지주":    ["하나금융", "하나은행"],
+    "카카오뱅크":     ["카뱅"],
+}
+
 
 def _noise_clause() -> str:
     """제목 블록리스트를 SQL AND 절로 변환 (키워드는 상수이므로 인젝션 위험 없음)."""
@@ -79,12 +95,25 @@ def _noise_clause() -> str:
 
 
 def _name_aliases(corp_name: str) -> list[str]:
-    """제목 매칭용 별칭. 정식명 + 그룹 접두사 제거형(3자 이상일 때만)."""
+    """제목 매칭용 별칭 목록.
+      · 정식명
+      · 그룹 접두사 제거형 (예: "SK하이닉스" → "하이닉스")
+      · "○○금융지주" → "○○금융" 규칙 (기사가 '지주'를 잘 안 씀)
+      · 수동 별칭 맵 (영문↔한글·약칭)
+    별칭은 오탐 방지를 위해 3자 이상만 사용.
+    """
     aliases = [corp_name]
+    # 그룹 접두사 제거 (3자 이상 남을 때만)
     for p in GROUP_PREFIXES:
         if corp_name.startswith(p) and len(corp_name) - len(p) >= 3:
             aliases.append(corp_name[len(p):])
-    return aliases
+    # "○○금융지주" → "○○금융" (지주 표기 생략 대응)
+    if corp_name.endswith("금융지주"):
+        aliases.append(corp_name[:-2])
+    # 수동 별칭
+    aliases.extend(MANUAL_ALIASES.get(corp_name, []))
+    # 3자 미만 별칭 제거 + 중복 제거
+    return list(dict.fromkeys(a for a in aliases if len(a) >= 3))
 
 
 def _load_index(source: str) -> faiss.Index:
@@ -104,7 +133,7 @@ def _fetch_articles(faiss_ids: list[int]) -> list[dict]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(f"""
             SELECT a.faiss_id, a.ticker, c.corp_name,
-                   a.title, a.content, a.source, a.published_at, a.url
+                   a.title, a.content, a.source, a.published_at, a.url, a.sentiment
             FROM articles a
             JOIN companies c ON a.ticker = c.ticker
             WHERE a.faiss_id IN ({placeholders})
@@ -180,24 +209,63 @@ def _recent_faiss_ids(ticker: str | None, pool_size: int) -> list[int]:
     return ids
 
 
-def _rank_pool_by_similarity(
+def _get_sentiment(a: dict) -> float:
+    """기사의 감성 점수. LLM이 미리 채점해 저장한 값(sentiment)을 우선 사용하고,
+    아직 라벨링 안 된 기사는 단어 사전(sentiment_score)으로 폴백."""
+    s = a.get("sentiment")
+    if s is not None:
+        return float(s)
+    return sentiment_score(a.get("title"), a.get("content"))
+
+
+def _rank_pool(
     index: faiss.Index,
     query_vec: np.ndarray,
     pool_ids: list[int],
     top_k: int,
-) -> list[tuple[int, float]]:
-    """후보 풀(pool_ids) 안에서만 query와의 cosine 유사도순으로 정렬해 top_k 반환.
-    IndexFlatIP.reconstruct로 빌드 시 정규화된 벡터를 되찾아 내적(=cosine)을 계산한다."""
+    bias: str | None = None,        # "bull" | "bear" | None
+    sentiment_weight: float = 0.0,
+) -> list[dict]:
+    """후보 풀(pool_ids)을 query 유사도 + 감성 보정으로 정렬해 top_k 기사 반환.
+
+    감성 필터 (bias가 bull/bear일 때):
+        · bias="bull" → 호재(sent > 0) 기사만 통과, 부호 +1로 가산
+        · bias="bear" → 악재(sent < 0) 기사만 통과, 부호 -1로 가산
+        · 중립(sent == 0)은 양쪽 모두 제외 → 해당 진영 기사가 부족하면 적게/비워서 반환
+        · bias=None(common) → 필터·가산 없음, 순수 유사도로 전부 후보
+
+        최종점수 = cosine 유사도 + sentiment_weight × bias부호 × 감성점수(-1~1)
+
+    IndexFlatIP.reconstruct로 빌드 시 정규화된 벡터를 되찾아 내적(=cosine)을 계산한다.
+    각 기사 dict에는 'score'(순수 유사도)를 기록한다.
+    """
+    bias_sign = {"bull": 1.0, "bear": -1.0}.get(bias, 0.0)
+    filter_active = bias_sign != 0.0   # bull/bear면 감성 필터 적용
+
     q = query_vec[0]
     ntotal = index.ntotal
-    scored: list[tuple[int, float]] = []
-    for fid in pool_ids:
-        if fid >= ntotal:          # 인덱스보다 큰 faiss_id(스테일) 방어
+
+    articles = _fetch_articles(pool_ids)   # 텍스트(title/content) 포함
+    ranked: list[tuple[float, dict]] = []
+    for a in articles:
+        fid = a["faiss_id"]
+        if fid >= ntotal:                  # 인덱스보다 큰 faiss_id(스테일) 방어
             continue
-        vec = index.reconstruct(fid)   # 빌드 시 정규화된 벡터
-        scored.append((fid, float(np.dot(q, vec))))
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:top_k]
+        sim = float(np.dot(q, index.reconstruct(fid)))
+        a["score"] = sim
+        final = sim
+        if filter_active:
+            sent = _get_sentiment(a)   # 저장된 LLM 점수 우선, 없으면 단어 사전 폴백
+            # bull은 호재만, bear는 악재만 (중립/반대극성 제외)
+            if bias_sign > 0 and sent <= 0:
+                continue
+            if bias_sign < 0 and sent >= 0:
+                continue
+            final = sim + sentiment_weight * bias_sign * sent
+        ranked.append((final, a))
+
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    return [a for _, a in ranked[:top_k]]
 
 
 def search(
@@ -207,6 +275,8 @@ def search(
     ticker: str = None,         # 특정 종목만 필터링 (선택)
     auto_detect: bool = True,   # 쿼리에서 회사명 자동 감지해 ticker 부스팅
     recent_pool: int = 30,      # 하이브리드 최신 후보 풀 크기 (앱에서는 config.RECENT_POOL 주입)
+    bias: str = None,           # "bull"|"bear"|None — 감성 보정 방향
+    sentiment_weight: float = 0.0,  # 감성 가중치 (앱에서는 config.SENTIMENT_WEIGHT 주입)
 ) -> list[dict]:
     """
     query를 임베딩해 FAISS로 유사 문서를 검색하고 SQLite 메타데이터를 반환
@@ -241,12 +311,10 @@ def search(
     if source == "articles" and hybrid_ticker:
         pool_ids = _recent_faiss_ids(hybrid_ticker, recent_pool)
         if pool_ids:
-            ranked = _rank_pool_by_similarity(index, query_vec, pool_ids, top_k)
-            results = _fetch_articles([fid for fid, _ in ranked])
-            score_map = dict(ranked)
-            for r in results:
-                r["score"] = score_map.get(r["faiss_id"], 0.0)
-            return results
+            return _rank_pool(
+                index, query_vec, pool_ids, top_k,
+                bias=bias, sentiment_weight=sentiment_weight,
+            )
         # 풀이 비면(=해당 종목 faiss_id 없음) 아래 전역 검색으로 폴백
 
     # ── 폴백: 기존 전역 유사도 검색 ──

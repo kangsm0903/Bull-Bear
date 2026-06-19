@@ -57,9 +57,10 @@ def build_articles_index(ticker: str = None):
 
     print(f"  대상: {len(rows)}건")
 
-    # 임베딩 텍스트 구성: [종목명] 제목. 본문 앞 500자
+    # 임베딩 텍스트 구성: 제목을 2회 반복해 주제 신호를 강화하고, 본문은 300자로 축소
+    # (긴 본문이 제목을 희석해 주변부 기사가 끼는 문제 완화)
     texts = [
-        f"[{corp_name}] {title}. {(content or '')[:500]}".strip()
+        f"[{corp_name}] {title}\n{title}\n{(content or '')[:300]}".strip()
         for _, corp_name, title, content in rows
     ]
 

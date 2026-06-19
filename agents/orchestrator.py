@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from agents.analyst import AnalystAgent
 from agents.moderator import ModeratorAgent
-from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE, RECENT_POOL
+from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE, RECENT_POOL, SENTIMENT_WEIGHT
 from agents.prompts import CONTENT_FIELDS
 from agents.query_expander import expand_query
 from rag.retriever import search, _detect_ticker
@@ -37,9 +37,12 @@ class DebateOrchestrator:
     def run(self, topic: str, on_round_complete=None) -> dict:
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
-        articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON, recent_pool=RECENT_POOL)
-        articles_bull   = search(queries["bull"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL)
-        articles_bear   = search(queries["bear"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL)
+        articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON, recent_pool=RECENT_POOL,
+                                 bias=None,   sentiment_weight=SENTIMENT_WEIGHT)
+        articles_bull   = search(queries["bull"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL,
+                                 bias="bull", sentiment_weight=SENTIMENT_WEIGHT)
+        articles_bear   = search(queries["bear"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL,
+                                 bias="bear", sentiment_weight=SENTIMENT_WEIGHT)
 
         detected_ticker = _detect_ticker(topic)
         quant_data = fetch_quant(detected_ticker) if detected_ticker else None

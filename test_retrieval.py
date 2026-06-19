@@ -13,8 +13,9 @@ orchestrator가 토론 전에 수행하는 '데이터 준비' 단계만 떼어�
 import sys
 
 from agents.query_expander import expand_query
-from agents.config import TOP_K_COMMON, TOP_K_SIDE, RECENT_POOL
+from agents.config import TOP_K_COMMON, TOP_K_SIDE, RECENT_POOL, SENTIMENT_WEIGHT
 from rag.retriever import search, _detect_ticker, _ticker_to_name
+from rag.retriever import _get_sentiment
 
 
 def main():
@@ -32,18 +33,20 @@ def main():
         print(f"    {k:>7}: {v}")
 
     sets: dict[str, list[dict]] = {}
-    for label, q, k in [
-        ("common", queries["common"], TOP_K_COMMON),
-        ("bull",   queries["bull"],   TOP_K_SIDE),
-        ("bear",   queries["bear"],   TOP_K_SIDE),
+    for label, q, k, bias in [
+        ("common", queries["common"], TOP_K_COMMON, None),
+        ("bull",   queries["bull"],   TOP_K_SIDE,   "bull"),
+        ("bear",   queries["bear"],   TOP_K_SIDE,   "bear"),
     ]:
-        print(f"\n=== {label}  (top_k={k})  [개별 검색 결과 — 중복 가능] ===")
-        results = search(q, source="articles", top_k=k, recent_pool=pool)
+        print(f"\n=== {label}  (top_k={k}, bias={bias}, w={SENTIMENT_WEIGHT})  [개별 검색] ===")
+        results = search(q, source="articles", top_k=k, recent_pool=pool,
+                         bias=bias, sentiment_weight=SENTIMENT_WEIGHT)
         sets[label] = results
         if not results:
             print("    (결과 없음)")
         for a in results:
-            print(f"    [{a['score']:.3f}] {a.get('published_at','')[:10]} "
+            sent = _get_sentiment(a)
+            print(f"    [sim {a['score']:.3f} | sent {sent:+.2f}] {a.get('published_at','')[:10]} "
                   f"| {a.get('title','')[:55]}")
 
     # ── 앱과 동일한 최종(중복 제거) 뷰 ──────────────────────

@@ -35,10 +35,13 @@ interface DebateChatProps {
 }
 
 const VERDICT_LABEL: Record<string, string> = {
-  '매수 적극': '🚀 Strong Buy',
-  '분할 매수': '📈 Accumulate',
+  '적극 매수': '🚀 Strong Buy',
+  '매수':      '📈 Buy',
+  '분할 매수': '📊 Accumulate',
   '관망':      '👀 Hold / Watch',
-  '매도 고려': '📉 Consider Sell',
+  '비중 축소': '📉 Reduce',
+  '매도 고려': '⚠️ Consider Sell',
+  '적극 매도': '🔻 Strong Sell',
 };
 
 export function DebateChat({ topic, debateData, onBack }: DebateChatProps) {

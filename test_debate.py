@@ -27,7 +27,6 @@ def main():
 
     result = orchestrator.run(
         topic=topic,
-        rounds=3,
         on_round_complete=on_round_complete,
     )
 

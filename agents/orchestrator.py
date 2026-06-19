@@ -1,16 +1,10 @@
 """
 agents/orchestrator.py — 토론 흐름 실행 엔진
 
-이 파일은 로직만 담당합니다. 발언 순서/모델/온도는 config.py에서 가져옵니다.
-프롬프트는 prompts.py를 통해 분리되어 있습니다.
-
-알고리즘:
-  1. config.DEBATE_FLOW의 각 라운드를 순회.
-  2. 라운드 내 step들을 의존성 레벨로 분류:
-       Level 0: argue/conclude (의존성 없음)
-       Level 1+: rebut (Level 0의 결과를 입력으로 받음)
-  3. 같은 레벨은 ThreadPoolExecutor로 병렬 호출.
-  4. 출력은 DEBATE_FLOW에 선언된 step 순서대로 정렬.
+[변경 사항 v2]
+- 토론 시작 시 tools.clear_session_articles() 호출 (컨테이너 초기화).
+- 토론 끝에 tools.get_session_articles()로 가져와 articles.common에 합쳐 UI에 노출.
+- UI(Source Materials)에서 웹검색으로 추가된 기사도 함께 표시됨.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +13,7 @@ from agents.analyst import AnalystAgent
 from agents.moderator import ModeratorAgent
 from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE
 from agents.query_expander import expand_query
+from agents.tools import clear_session_articles, get_session_articles
 from rag.retriever import search, _detect_ticker
 from rag.quant_fetcher import fetch_quant, format_quant
 
@@ -34,6 +29,9 @@ class DebateOrchestrator:
 
     # ─────────────────────────────────────────────────────
     def run(self, topic: str, on_round_complete=None) -> dict:
+        # ── 0. 세션 초기화 (tool 컨테이너 비우기) ────
+        clear_session_articles()
+
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
         articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON)
@@ -74,12 +72,20 @@ class DebateOrchestrator:
             articles_common=articles_common,
         )
 
+        # ── 4. tool로 가져온 기사 합치기 ──────────────
+        # search_web_news로 토론 중 가져온 새 기사들을 UI에 노출
+        tool_fetched = get_session_articles()
+        # 중복 제거 (제목 기준)
+        existing_titles = {a.get("title") for a in articles_common}
+        tool_fetched_unique = [a for a in tool_fetched if a.get("title") not in existing_titles]
+        articles_common_final = articles_common + tool_fetched_unique
+
         return {
             "topic": topic,
             "rounds": all_rounds,
             "moderator": moderator_result,
             "articles": {
-                "common": articles_common,
+                "common": articles_common_final,
                 "bull":   articles_bull,
                 "bear":   articles_bear,
             },
@@ -149,7 +155,6 @@ class DebateOrchestrator:
 # 내부 헬퍼
 # ═════════════════════════════════════════════════════════
 def _find_step(steps: list[dict], target_role: str, target_action: str) -> int | None:
-    """주어진 (role, action)에 매칭되는 step의 index 반환."""
     for i, s in enumerate(steps):
         if s["role"] == target_role and s["action"] == target_action:
             return i
@@ -157,11 +162,6 @@ def _find_step(steps: list[dict], target_role: str, target_action: str) -> int |
 
 
 def _compute_levels(steps: list[dict]) -> list[list[int]]:
-    """
-    step들을 의존성 레벨로 그룹화.
-    Level 0: rebut이 아닌 step (의존성 없음)
-    Level N: 의존하는 step의 레벨 + 1
-    """
     level_of: dict[int, int] = {}
     for i, step in enumerate(steps):
         if step["action"] != "rebut":
@@ -178,11 +178,10 @@ def _compute_levels(steps: list[dict]) -> list[list[int]]:
 
 
 def _to_message(round_num: int, step: dict, result: dict) -> dict:
-    """에이전트 결과를 메시지 dict로 변환."""
     return {
         "round":   round_num,
-        "role":    step["role"],          # 'bull' | 'bear'
-        "kind":    step["action"],        # 'argue' | 'rebut' | 'conclude'
+        "role":    step["role"],
+        "kind":    step["action"],
         "content": result.get("content", ""),
         "tags":    result.get("tags", []),
     }

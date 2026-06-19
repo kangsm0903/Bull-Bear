@@ -1,13 +1,10 @@
 """
 agents/analyst.py — Bull/Bear 통합 애널리스트 에이전트
 
-Bull과 Bear는 system_prompt와 입력 데이터만 다르고 호출 구조가 동일합니다.
-하나의 클래스에 role 파라미터로 통합합니다.
-
-세 가지 액션:
-  - argue:    독립 주장
-  - rebut:    상대 주장에 대한 반론
-  - conclude: 최종 결론 (Round 3)
+[변경 사항 v2]
+- argue 메서드에서 round_num == 1 일 때 search_web_news를 강제 호출.
+  (데모 목적: 첫 라운드에서 무조건 최신 웹 뉴스 1회 가져오기)
+- rebut, conclude는 모델 자율 판단.
 """
 
 from agents.base_agent import BaseAgent
@@ -50,7 +47,9 @@ class AnalystAgent(BaseAgent):
             articles_side=articles_side,
             quant_text=quant_text,
         )
-        return self._chat(prompt, temperature=TEMPERATURE["argue"])
+        # 데모 목적: Round 1 argue에서는 무조건 웹검색 1회 강제
+        force = "search_web_news" if round_num == 1 else None
+        return self._chat_with_tools(prompt, temperature=TEMPERATURE["argue"], force_tool=force)
 
     def rebut(
         self,
@@ -70,7 +69,7 @@ class AnalystAgent(BaseAgent):
             articles_side=articles_side,
             quant_text=quant_text,
         )
-        return self._chat(prompt, temperature=TEMPERATURE["rebut"])
+        return self._chat_with_tools(prompt, temperature=TEMPERATURE["rebut"])
 
     def conclude(
         self,
@@ -86,7 +85,7 @@ class AnalystAgent(BaseAgent):
             articles_side=articles_side,
             quant_text=quant_text,
         )
-        return self._chat(prompt, temperature=TEMPERATURE["conclude"])
+        return self._chat_with_tools(prompt, temperature=TEMPERATURE["conclude"])
 
     # ── action 이름으로 디스패치 (orchestrator가 사용) ─
     def run_action(

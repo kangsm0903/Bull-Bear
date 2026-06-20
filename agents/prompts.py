@@ -221,6 +221,26 @@ def _persona_directive(user_persona: str) -> str:
     )
 
 
+# ── 희망 투자기간 → 근거 강조 (톤이 아닌 '무엇을 부각할지'를 결정) ──
+HORIZON_EMPHASIS = {
+    "단기": "단기(수개월 이내) 투자자입니다. 같은 분석 안에서 촉매(이벤트)·실적 모멘텀/서프라이즈·수급·투자심리 등 단기 주가에 영향을 주는 근거를 우선 부각하세요.",
+    "중기": "중기(6개월~1년) 투자자입니다. 같은 분석 안에서 실적 추세·밸류에이션 정상화·업황 사이클 등 중기 관점 근거를 우선 부각하세요.",
+    "장기": "장기(1년 이상) 투자자입니다. 같은 분석 안에서 구조적 경쟁우위(해자)·산업 성장성·재무 건전성·장기 밸류에이션 등 장기 관점 근거를 우선 부각하세요.",
+}
+
+
+def _horizon_directive(horizon: str) -> str:
+    """희망 투자기간에 맞춰 '어떤 근거를 부각할지'를 지시. 최종 판단·수치는 불변."""
+    emphasis = HORIZON_EMPHASIS.get(horizon, "")
+    if not emphasis:
+        return ""
+    return (
+        "\n━━━ 투자기간 관점 (근거 강조) ━━━\n"
+        f"독자는 {emphasis}\n"
+        "단, 어떤 근거를 부각하든 최종 투자판단·수치·사실은 투자기간과 무관하게 동일하게 유지하세요.\n"
+    )
+
+
 def _tools_block(stance: str, action: str = "argue") -> str:
     """조사 방식에 따라 발언별 도구 사용 지시를 주입.
 
@@ -463,6 +483,7 @@ def build_argue_prompt(
     memory_context: str = "",
     user_persona: str = "",
     persona_tier: str = "",
+    horizon: str = "",
 ) -> str:
     display = ROLE_META[role]["display"]
     stance  = ROLE_META[role]["stance"]
@@ -470,7 +491,7 @@ def build_argue_prompt(
     return f"""[토론 주제]: {topic}
 [현재 라운드]: Round {round_num}
 [당신의 역할]: {display} — {stance} 입장
-{_persona_block(user_persona)}{_memory_block(memory_context)}
+{_persona_block(user_persona)}{_horizon_directive(horizon)}{_memory_block(memory_context)}
 {_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "argue")}
 
 {_few_shot_argue(role, persona_tier)}━━━ 지시 ━━━
@@ -497,6 +518,7 @@ def build_rebut_prompt(
     memory_context: str = "",
     user_persona: str = "",
     persona_tier: str = "",
+    horizon: str = "",
 ) -> str:
     display       = ROLE_META[role]["display"]
     stance        = ROLE_META[role]["stance"]
@@ -506,7 +528,7 @@ def build_rebut_prompt(
     return f"""[토론 주제]: {topic}
 [현재 라운드]: Round {round_num}
 [당신의 역할]: {display} — {stance} 입장
-{_persona_block(user_persona)}{_memory_block(memory_context)}
+{_persona_block(user_persona)}{_horizon_directive(horizon)}{_memory_block(memory_context)}
 ━━━ 반박해야 할 상대({opponent_disp})의 주장 ━━━
 {opponent_statement}
 
@@ -564,6 +586,7 @@ def build_conclude_prompt(
     quant_text: str,
     memory_context: str = "",
     user_persona: str = "",
+    horizon: str = "",
 ) -> str:
     display = ROLE_META[role]["display"]
     stance  = ROLE_META[role]["stance"]
@@ -571,7 +594,7 @@ def build_conclude_prompt(
     return f"""[토론 주제]: {topic}
 [현재 라운드]: Round 3 (최종)
 [당신의 역할]: {display} — {stance} 입장
-{_persona_block(user_persona)}{_memory_block(memory_context)}
+{_persona_block(user_persona)}{_horizon_directive(horizon)}{_memory_block(memory_context)}
 {_articles_block(role, articles_common, articles_side)}
 
 {_quant_block(quant_text)}
@@ -719,7 +742,7 @@ SURVEY_LABELS = {
 def build_profile_prompt(survey: dict) -> str:
     answers = "\n".join(
         f"- {SURVEY_LABELS.get(k, k)}: {v}"
-        for k, v in survey.items() if v
+        for k, v in survey.items() if v and k != "horizon"   # horizon은 톤이 아닌 내용 강조용 → 프로파일러 제외
     ) or "- (응답 없음)"
 
     return f"""다음은 투자 토론을 읽을 독자의 설문 응답입니다.

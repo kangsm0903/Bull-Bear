@@ -67,6 +67,11 @@ class DebateOrchestrator:
         if persona_tier:
             print(f"  [Persona] tier = {persona_tier}")
 
+        # 희망 투자기간 (설문에서) → 근거 강조용. 최종 판단·수치는 불변.
+        horizon = (survey or {}).get("horizon", "")
+        if horizon:
+            print(f"  [Persona] horizon = {horizon}")
+
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
         articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON, min_score=RAG_MIN_SCORE)
@@ -112,6 +117,7 @@ class DebateOrchestrator:
                 memory_context=memory_context,
                 user_persona=user_persona,
                 persona_tier=persona_tier,
+                horizon=horizon,
                 on_round_complete=on_round_complete,
             )
         else:
@@ -126,6 +132,7 @@ class DebateOrchestrator:
                     memory_context=memory_context,
                     user_persona=user_persona,
                     persona_tier=persona_tier,
+                    horizon=horizon,
                 )
                 all_rounds.append(round_msgs)
                 if on_round_complete:
@@ -188,6 +195,7 @@ class DebateOrchestrator:
         memory_context: str = "",
         user_persona: str = "",
         persona_tier: str = "",
+        horizon: str = "",
     ) -> list[dict]:
         """한 라운드 실행. 의존성 레벨별로 병렬 호출."""
         round_num = round_cfg["round"]
@@ -219,6 +227,7 @@ class DebateOrchestrator:
                 memory_context=memory_context,
                 user_persona=user_persona,
                 persona_tier=persona_tier,
+                horizon=horizon,
             )
 
         # 의존성 레벨 계산
@@ -253,6 +262,7 @@ class DebateOrchestrator:
         memory_context: str,
         user_persona: str,
         persona_tier: str = "",
+        horizon: str = "",
         on_round_complete=None,
     ) -> list[list[dict]]:
         """
@@ -279,6 +289,7 @@ class DebateOrchestrator:
                 memory_context=memory_context,
                 user_persona=user_persona,
                 persona_tier=persona_tier,
+                horizon=horizon,
             )
             all_rounds.append(round_msgs)
             if on_round_complete:

@@ -166,8 +166,8 @@ BullBear/
 MODEL_NAME = "gpt-4o"          # → "gpt-4o-mini"로 바꾸면 비용 1/10
 
 TEMPERATURE = {
-    "argue":     0.7,          # 주장: 다양성
-    "rebut":     0.7,          # 반론: 다양성
+    "argue":     0.4,          # 주장: 환각 억제 위해 낮춤
+    "rebut":     0.4,          # 반론: 환각 억제 위해 낮춤
     "conclude":  0.3,          # 결론: 일관성
     "moderator": 0.3,          # 사회자: 일관성
 }

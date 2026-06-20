@@ -20,6 +20,7 @@ from agents.config import (
     TEMPERATURE,
 )
 from agents.tools import TOOL_SCHEMAS, cache_key, dispatch
+from agents.verifier import verify_numbers
 from agents.prompts import (
     SYSTEM_PROMPTS,
     build_argue_prompt,
@@ -81,13 +82,14 @@ class AnalystAgent(BaseAgent):
         return articles
 
     # ── LLM 호출 (조사 방식 분기) ───────────────────────
-    def _run_llm(self, prompt: str, temperature: float, can_top_up: bool = False) -> tuple[dict, list]:
+    def _run_llm(self, prompt: str, temperature: float, can_top_up: bool = False) -> tuple[dict, list, str]:
         """조사 방식에 따라 발언 전 조사 여부를 결정한 뒤 최종 답변 생성.
 
         - per_step: 모든 발언에서 (필수) 조사.
         - hybrid:   argue는 사전 조사 근거만 사용(can_top_up=False), rebut만 추가 조사(can_top_up=True).
         - upfront/OFF: 발언 중 조사 없음. 근거는 이미 articles_side로 프롬프트에 들어있음.
-        반환: (draft dict, 이 발언에서 조사한 기사 리스트).
+        반환: (draft dict, 이 발언에서 조사한 기사 리스트, 실제 사용한 프롬프트).
+              실제 프롬프트는 조사 결과까지 합친 것으로, Self-Reflection이 같은 근거로 검토하도록 돌려준다.
         """
         do_research = ENABLE_TOOL_CALLING and (
             RESEARCH_MODE == "per_step"
@@ -102,8 +104,8 @@ class AnalystAgent(BaseAgent):
                 temperature=temperature,
             )
             final_prompt = _with_research_context(prompt, research_text)
-            return self._chat(final_prompt, temperature=temperature), articles
-        return self._chat(prompt, temperature=temperature), []
+            return self._chat(final_prompt, temperature=temperature), articles, final_prompt
+        return self._chat(prompt, temperature=temperature), [], prompt
 
     # ── Self-Reflection ──────────────────────────────────
     def _reflect(self, draft: dict, input_prompt: str) -> dict:
@@ -112,11 +114,16 @@ class AnalystAgent(BaseAgent):
             return draft
 
         stance = ROLE_META[self.role]["stance"]
+        # 결정적 수치 검증: 출력 수치 중 입력 데이터에서 못 찾은 것을 reflection에 근거로 제공
+        ungrounded = verify_numbers(draft.get("content", ""), input_prompt)
+        if ungrounded:
+            print(f"  [NumCheck] {self.role.upper()} 미검증 수치: {ungrounded}")
         ref_prompt = build_reflection_prompt(
             role=self.role,
             stance=stance,
             draft=draft.get("content", ""),
             input_prompt=input_prompt,
+            ungrounded_numbers=ungrounded,
         )
         result = self._chat(ref_prompt, temperature=TEMPERATURE["reflect"])
 
@@ -154,8 +161,8 @@ class AnalystAgent(BaseAgent):
             user_persona=user_persona,
             persona_tier=persona_tier,
         )
-        draft, articles = self._run_llm(prompt, TEMPERATURE["argue"], can_top_up=False)
-        result = self._reflect(draft, prompt)
+        draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["argue"], can_top_up=False)
+        result = self._reflect(draft, eff_prompt)
         result["researched_articles"] = articles
         return result
 
@@ -183,8 +190,8 @@ class AnalystAgent(BaseAgent):
             user_persona=user_persona,
             persona_tier=persona_tier,
         )
-        draft, articles = self._run_llm(prompt, TEMPERATURE["rebut"], can_top_up=True)
-        result = self._reflect(draft, prompt)
+        draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["rebut"], can_top_up=True)
+        result = self._reflect(draft, eff_prompt)
         result["researched_articles"] = articles
         return result
 

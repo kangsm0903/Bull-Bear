@@ -590,21 +590,40 @@ def build_conclude_prompt(
 # ═════════════════════════════════════════════════════════
 # 4. reflection 프롬프트 — 자기 검토 및 수정
 # ═════════════════════════════════════════════════════════
-def build_reflection_prompt(role: str, stance: str, draft: str, input_prompt: str) -> str:
+def _num_check_block(ungrounded_numbers: list[str] | None) -> str:
+    if not ungrounded_numbers:
+        return ""
+    nums = ", ".join(ungrounded_numbers)
+    return f"""
+[자동 수치 검증 — 결정적 사전검사]
+다음 수치는 위 입력 데이터에서 문자열로 찾지 못했습니다: {nums}
+→ 각 수치가 실제로 입력 데이터에 있는지 다시 확인하세요. 없으면 제거하거나 데이터에 있는 값으로 수정하세요.
+(단, 표현 차이(예: 59만원 ↔ 590,000원)로 인한 오탐일 수 있으니, 실제로 데이터에 있으면 그대로 두세요.)
+"""
+
+
+def build_reflection_prompt(
+    role: str,
+    stance: str,
+    draft: str,
+    input_prompt: str,
+    ungrounded_numbers: list[str] | None = None,
+) -> str:
     return f"""[Self-Reflection: 초안 자기 검토]
 
-아래는 당신이 방금 작성한 초안입니다. 입력 데이터를 기준으로 3가지 기준을 검토하세요.
+아래는 당신이 방금 작성한 초안입니다. 입력 데이터를 기준으로 4가지 기준을 검토하세요.
 
 [당신에게 주어진 입력]
 {input_prompt}
 
 [초안]
 {draft}
-
+{_num_check_block(ungrounded_numbers)}
 [검토 기준]
 1. 할루시네이션: 초안의 모든 수치/날짜/사실이 위 입력 데이터에 명시된 것인가?
 2. 역할 일관성: {role.upper()}({stance}) 입장을 일관되게 유지했는가?
 3. 근거 인용: 주장을 구체적인 수치나 사실로 뒷받침했는가?
+4. 논리 비약: 근거에서 결론으로 가는 인과가 데이터로 뒷받침되는가? (예: "A 제도 도입 → 매출 증가"처럼 데이터에 없는 인과를 임의로 연결하지 않았는가?)
 
 문제가 없으면 verdict를 "OK"로 설정하고 content와 tags를 그대로 유지하세요.
 문제가 있으면 verdict를 "REVISE"로 설정하고 수정된 내용을 작성하세요.

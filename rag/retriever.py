@@ -98,6 +98,7 @@ def search(
     top_k: int = 5,
     ticker: str = None,         # 특정 종목만 필터링 (선택)
     auto_detect: bool = True,   # 쿼리에서 회사명 자동 감지해 ticker 부스팅
+    min_score: float = 0.0,     # 이 유사도 미만 결과 제외 (전부 미달이면 무시하고 top_k 유지)
 ) -> list[dict]:
     """
     query를 임베딩해 FAISS로 유사 문서를 검색하고 SQLite 메타데이터를 반환
@@ -153,5 +154,12 @@ def search(
         matched = [r for r in results if r.get("ticker") == detected]
         if matched:
             results = matched
+
+    # 유사도 하한: 저관련 기사를 근거에서 제외. 단 전부 미달이면
+    # 근거가 0건이 되어 토론이 깨지므로 하한을 무시하고 원본을 유지한다.
+    if min_score > 0.0:
+        passed = [r for r in results if r.get("score", 0.0) >= min_score]
+        if passed:
+            results = passed
 
     return results[:top_k]

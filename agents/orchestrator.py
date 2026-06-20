@@ -25,6 +25,7 @@ from agents.config import (
     ENABLE_TOOL_CALLING,
     FREE_DEBATE_ROUND,
     MAX_DEBATE_ROUNDS,
+    RAG_MIN_SCORE,
     RESEARCH_MODE,
     TOP_K_COMMON,
     TOP_K_SIDE,
@@ -68,7 +69,7 @@ class DebateOrchestrator:
 
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
-        articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON)
+        articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON, min_score=RAG_MIN_SCORE)
 
         detected_ticker = _detect_ticker(topic)
         quant_data = fetch_quant(detected_ticker) if detected_ticker else None
@@ -82,8 +83,8 @@ class DebateOrchestrator:
             articles_by_side = {"bull": [], "bear": []}
         else:
             articles_by_side = {
-                "bull": search(queries["bull"], source="articles", top_k=TOP_K_SIDE),
-                "bear": search(queries["bear"], source="articles", top_k=TOP_K_SIDE),
+                "bull": search(queries["bull"], source="articles", top_k=TOP_K_SIDE, min_score=RAG_MIN_SCORE),
+                "bear": search(queries["bear"], source="articles", top_k=TOP_K_SIDE, min_score=RAG_MIN_SCORE),
             }
 
         # ── 2. 메모리 검색 ────────────────────────────

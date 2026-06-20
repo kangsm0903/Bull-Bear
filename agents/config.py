@@ -18,8 +18,8 @@ REASONING_EFFORT = "medium"  # o1/o3 계열 전용: "low" | "medium" | "high"
 
 # 발언 종류별 temperature (높을수록 다양/창의적, 낮을수록 일관/결정적)
 TEMPERATURE = {
-    "argue":       0.7,
-    "rebut":       0.7,
+    "argue":       0.4,
+    "rebut":       0.4,
     "conclude":    0.3,   # 최종 결론은 일관성 중시
     "moderator":   0.3,
     "reflect":     0.1,   # Self-Reflection은 결정적 판단
@@ -30,7 +30,7 @@ TEMPERATURE = {
 # ─────────────────────────────────────────────────────────
 # 프롬프트 전략 플래그 (ablation 실험용 on/off)
 # ─────────────────────────────────────────────────────────
-ENABLE_REFLECTION = False  # Self-Reflection 자기 검토
+ENABLE_REFLECTION = True   # Self-Reflection 자기 검토
 ENABLE_MEMORY     = False  # 과거 토론 참조
 ENABLE_COT        = False  # Chain-of-Thought 단계적 추론
 ENABLE_FEW_SHOT   = True   # Few-shot 예시 주입
@@ -74,6 +74,7 @@ RETRY_WAIT_SECONDS = [15, 30]   # 1번째 실패 후 15초, 2번째 실패 후 3
 # ─────────────────────────────────────────────────────────
 TOP_K_COMMON = 3   # 공통 기사 수
 TOP_K_SIDE   = 2   # Bull/Bear 측 기사 수
+RAG_MIN_SCORE = 0.35  # 이 유사도 미만 기사는 근거에서 제외(전부 미달이면 안전하게 top_k 유지)
 
 
 # ─────────────────────────────────────────────────────────

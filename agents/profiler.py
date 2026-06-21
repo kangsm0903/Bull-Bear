@@ -5,9 +5,8 @@ agents/profiler.py — 독자 프로파일러 에이전트
 이 프로필은 orchestrator를 거쳐 Bull/Bear/Moderator 프롬프트의 _persona_block에 주입된다.
 
 규칙(프롬프트에 명시):
-  - 지식 관련 응답(투자 기간/자가 수준/용어 숙지도/설명 깊이) → 설명 깊이·용어·밀도 결정.
-  - 나이대 → 톤·예시에만 가볍게 반영.
-  - 성별 → 분석 내용·결론에 영향 금지 (편향 방지).
+  - 지식 관련 응답(자가 수준/용어 숙지도/설명 깊이) → 설명 깊이·용어·밀도 결정.
+  - 투자 판단의 객관성은 독자와 무관하게 동일 (달라지는 것은 전달 방식뿐).
 """
 
 from agents.base_agent import BaseAgent
@@ -29,4 +28,8 @@ class ProfilerAgent(BaseAgent):
             build_profile_prompt(survey),
             temperature=TEMPERATURE["profiler"],
         )
-        return (result.get("profile") or "").strip()
+        profile = result.get("profile") or ""
+        # 모델이 profile을 리스트(불릿 배열)로 반환하는 경우가 있어 문자열로 정규화.
+        if isinstance(profile, list):
+            profile = "\n".join(str(x) for x in profile)
+        return profile.strip()

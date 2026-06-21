@@ -35,7 +35,7 @@ app.add_middleware(
 
 class DebateRequest(BaseModel):
     topic: str
-    survey: dict | None = None   # 설문 응답 {gender, age, experience, level, terminology, depth}
+    survey: dict | None = None   # 설문 응답 {level, terminology, depth, horizon}
 
 
 @app.post("/api/debate")

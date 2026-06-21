@@ -72,6 +72,11 @@ class DebateOrchestrator:
         if horizon:
             print(f"  [Persona] horizon = {horizon}")
 
+        # 선호 설명 깊이 (설문에서) → 답변 분량 조절. 최종 판단·수치는 불변.
+        depth = (survey or {}).get("depth", "")
+        if depth:
+            print(f"  [Persona] depth = {depth}")
+
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
         articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON, min_score=RAG_MIN_SCORE)
@@ -118,6 +123,7 @@ class DebateOrchestrator:
                 user_persona=user_persona,
                 persona_tier=persona_tier,
                 horizon=horizon,
+                depth=depth,
                 on_round_complete=on_round_complete,
             )
         else:
@@ -133,6 +139,7 @@ class DebateOrchestrator:
                     user_persona=user_persona,
                     persona_tier=persona_tier,
                     horizon=horizon,
+                    depth=depth,
                     prior_rounds=all_rounds,
                 )
                 all_rounds.append(round_msgs)
@@ -197,6 +204,7 @@ class DebateOrchestrator:
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        depth: str = "",
         prior_rounds: list[list[dict]] | None = None,
     ) -> list[dict]:
         """한 라운드 실행. 의존성 레벨별로 병렬 호출."""
@@ -230,6 +238,7 @@ class DebateOrchestrator:
                 user_persona=user_persona,
                 persona_tier=persona_tier,
                 horizon=horizon,
+                depth=depth,
                 own_history=_own_history(prior_rounds, role),
             )
 
@@ -266,6 +275,7 @@ class DebateOrchestrator:
         user_persona: str,
         persona_tier: str = "",
         horizon: str = "",
+        depth: str = "",
         on_round_complete=None,
     ) -> list[list[dict]]:
         """
@@ -293,6 +303,7 @@ class DebateOrchestrator:
                 user_persona=user_persona,
                 persona_tier=persona_tier,
                 horizon=horizon,
+                depth=depth,
                 prior_rounds=all_rounds,
             )
             all_rounds.append(round_msgs)

@@ -153,6 +153,31 @@ _FEW_SHOT_ARGUE_PLAIN = {
 {_FEW_SHOT_NOTICE}""",
 }
 
+
+# ── 개인투자자(intermediate) 전용 few-shot ─────────────────
+# 표준 용어를 풀이 없이 쓰되, 투자 시사점(액션)을 분명히 한다. (전문가용보다 덜 밀도 높음)
+_FEW_SHOT_ARGUE_INTER = {
+    "bull": f"""\
+━━━ 출력 예시 (개인투자자용 매수 주장 — 구조 참고용) ━━━
+[가정] 데이터에 [목표주가 상향], [영업이익 전망 상향], [시장점유율 확대] 정보가 있는 경우
+{{
+  "reasoning": "1. [영업이익 [X]% 상향], [목표주가 [N]만원], [점유율 [A]→[B]%] 확인. 2. 이익 모멘텀과 점유율 확대가 핵심. 3. 투자 시사점 중심으로 전달.",
+  "content": "영업이익 전망이 [X]% 상향돼 이익 모멘텀이 살아 있습니다. 점유율이 [A]%에서 [B]%로 확대된 점은 경쟁력 강화를 뒷받침하며, 이를 반영해 목표주가도 [N]만원으로 올랐습니다. 현재 주가 기준 추가 상승 여력이 남아 있어 분할 매수로 접근할 만합니다.",
+  "tags": ["이익 모멘텀", "점유율 확대", "목표주가 상향"]
+}}
+{_FEW_SHOT_NOTICE}""",
+
+    "bear": f"""\
+━━━ 출력 예시 (개인투자자용 매도 주장 — 구조 참고용) ━━━
+[가정] 데이터에 [고PER], [성장률 둔화], [원가 압박] 정보가 있는 경우
+{{
+  "reasoning": "1. [PER [X]배(섹터 [Y]배)], [성장률 [A]→[B]% 둔화], [원가 압박] 확인. 2. 밸류 부담과 성장 둔화가 핵심. 3. 투자 시사점 중심으로 전달.",
+  "content": "현재 PER [X]배는 섹터 평균 [Y]배를 웃돌아 밸류에이션 부담이 있습니다. 매출 성장률이 [A]%에서 [B]%로 둔화되는 가운데 원가 압박까지 겹쳐 마진 개선이 쉽지 않습니다. 단기 모멘텀이 약한 만큼 지금은 추격 매수보다 조정을 기다리는 편이 안전합니다.",
+  "tags": ["밸류 부담", "성장 둔화", "마진 압박"]
+}}
+{_FEW_SHOT_NOTICE}""",
+}
+
 _FEW_SHOT_REBUT_PLAIN = f"""\
 ━━━ 출력 예시 (쉬운 설명 버전 — 구조 참고용) ━━━
 [가정] 상대가 [목표주가 상향]을 저평가 근거로 사용한 경우
@@ -164,19 +189,37 @@ _FEW_SHOT_REBUT_PLAIN = f"""\
 {_FEW_SHOT_NOTICE}"""
 
 
+_FEW_SHOT_REBUT_INTER = f"""\
+━━━ 출력 예시 (개인투자자용 반박 — 구조 참고용) ━━━
+[가정] 상대가 [목표주가 상향]을 저평가 근거로 사용한 경우
+{{
+  "reasoning": "1. 상대는 [목표주가 상향]을 저평가 근거로 사용. 2. 목표주가 달성률이 낮은 점이 약점. 3. 투자 시사점 중심으로 반박.",
+  "content": "목표주가 상향만으로 저평가라 보긴 어렵습니다. 데이터상 목표주가 달성률이 [X]%에 그쳐 실현 가능성이 제한적이고, 현재 밸류에이션도 섹터 평균을 웃돕니다. 이미 낙관론이 주가에 반영된 만큼 목표주가 상향을 매수 신호로 받아들이기엔 이릅니다.",
+  "tags": ["목표주가 신뢰성", "밸류 부담", "추정치 한계"]
+}}
+{_FEW_SHOT_NOTICE}"""
+
+
 # 독자 등급 매핑 (few-shot 변형 선택용)
 PRESET_TIER = {"입문자": "beginner", "개인투자자": "intermediate", "전문가": "expert"}
 
+# 자가수준·용어숙지 점수 (합산 → 3단 등급). 미응답은 중간값(1)으로 처리.
+_LEVEL_SCORE = {"입문자": 0, "개인투자자": 1, "전문가": 2}
+_TERM_SCORE  = {"낮음": 0, "보통": 1, "높음": 2}
+
 
 def resolve_persona_tier(user_persona: str = "", survey: dict | None = None) -> str:
-    """few-shot 변형 선택용 거친 등급. 설문이 있으면 규칙으로, 없으면 프리셋 키로 산출."""
+    """few-shot 변형 선택용 등급(beginner/intermediate/expert).
+
+    설문이 있으면 '자가 수준 + 용어 숙지' 점수 합(0~4)으로 3단 산출:
+      0~1 → beginner, 2 → intermediate, 3~4 → expert.
+    (설명 깊이는 등급이 아니라 분량을 결정하므로 _depth_directive로 분리.)
+    """
     if survey:
-        level = survey.get("level")
-        term  = survey.get("terminology")
-        depth = survey.get("depth")
-        if level == "입문자" or term == "낮음" or depth == "쉽고 간단":
+        score = _LEVEL_SCORE.get(survey.get("level"), 1) + _TERM_SCORE.get(survey.get("terminology"), 1)
+        if score <= 1:
             return "beginner"
-        if level == "전문가" or term == "높음":
+        if score >= 3:
             return "expert"
         return "intermediate"
     return PRESET_TIER.get(user_persona, "")
@@ -193,14 +236,20 @@ def _maybe_strip_reasoning(example: str) -> str:
 def _few_shot_argue(role: str, persona_tier: str = "") -> str:
     if not ENABLE_FEW_SHOT:
         return ""
-    examples = _FEW_SHOT_ARGUE_PLAIN if persona_tier == "beginner" else _FEW_SHOT_ARGUE
+    examples = {
+        "beginner":     _FEW_SHOT_ARGUE_PLAIN,
+        "intermediate": _FEW_SHOT_ARGUE_INTER,
+    }.get(persona_tier, _FEW_SHOT_ARGUE)   # expert/미지정 → 기본(전문가용)
     return f"\n{_maybe_strip_reasoning(examples.get(role, ''))}\n"
 
 
 def _few_shot_rebut(persona_tier: str = "") -> str:
     if not ENABLE_FEW_SHOT:
         return ""
-    example = _FEW_SHOT_REBUT_PLAIN if persona_tier == "beginner" else _FEW_SHOT_REBUT
+    example = {
+        "beginner":     _FEW_SHOT_REBUT_PLAIN,
+        "intermediate": _FEW_SHOT_REBUT_INTER,
+    }.get(persona_tier, _FEW_SHOT_REBUT)   # expert/미지정 → 기본(전문가용)
     return f"\n{_maybe_strip_reasoning(example)}\n"
 
 
@@ -248,6 +297,26 @@ def _horizon_directive(horizon: str) -> str:
         "\n━━━ 투자기간 관점 (근거 강조) ━━━\n"
         f"독자는 {emphasis}\n"
         "단, 어떤 근거를 부각하든 최종 투자판단·수치·사실은 투자기간과 무관하게 동일하게 유지하세요.\n"
+    )
+
+
+# ── 선호 설명 깊이 → 분량 조절 (등급과 무관한 '길이'만 결정) ──
+DEPTH_LENGTH = {
+    "쉽고 간단": "가장 중요한 근거 1~2개만 골라 3문장 이내로 짧게 압축하세요.",
+    "균형":     "핵심 근거 2~3개로 4~6문장의 균형 잡힌 분량으로 작성하세요.",
+    "심층·정밀": "근거를 다각도로 충분히 전개해 6문장 이상으로 깊이 있게 작성하세요.",
+}
+
+
+def _depth_directive(depth: str) -> str:
+    """선호 설명 깊이에 맞춰 답변 '분량'을 지시. 투자 판단·수치는 불변."""
+    instr = DEPTH_LENGTH.get(depth, "")
+    if not instr:
+        return ""
+    return (
+        "\n━━━ 설명 깊이 (분량) ━━━\n"
+        f"{instr}\n"
+        "단, 분량과 무관하게 투자 판단·핵심 수치·사실은 동일하게 유지하세요.\n"
     )
 
 
@@ -539,6 +608,7 @@ def build_argue_prompt(
     user_persona: str = "",
     persona_tier: str = "",
     horizon: str = "",
+    depth: str = "",
     own_history: str = "",
 ) -> str:
     display = ROLE_META[role]["display"]
@@ -547,7 +617,7 @@ def build_argue_prompt(
     return f"""[토론 주제]: {topic}
 [현재 라운드]: Round {round_num}
 [당신의 역할]: {display} — {stance} 입장
-{_persona_block(user_persona)}{_horizon_directive(horizon)}{_memory_block(memory_context)}
+{_persona_block(user_persona)}{_horizon_directive(horizon)}{_depth_directive(depth)}{_memory_block(memory_context)}
 {_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "argue", round_num)}{_own_history_block(own_history)}
 
 {_few_shot_argue(role, persona_tier)}━━━ 지시 ━━━
@@ -574,6 +644,7 @@ def build_rebut_prompt(
     user_persona: str = "",
     persona_tier: str = "",
     horizon: str = "",
+    depth: str = "",
     own_history: str = "",
 ) -> str:
     display       = ROLE_META[role]["display"]
@@ -584,7 +655,7 @@ def build_rebut_prompt(
     return f"""[토론 주제]: {topic}
 [현재 라운드]: Round {round_num}
 [당신의 역할]: {display} — {stance} 입장
-{_persona_block(user_persona)}{_horizon_directive(horizon)}{_memory_block(memory_context)}
+{_persona_block(user_persona)}{_horizon_directive(horizon)}{_depth_directive(depth)}{_memory_block(memory_context)}
 ━━━ 반박해야 할 상대({opponent_disp})의 주장 ━━━
 {opponent_statement}
 
@@ -644,6 +715,7 @@ def build_conclude_prompt(
     memory_context: str = "",
     user_persona: str = "",
     horizon: str = "",
+    depth: str = "",
 ) -> str:
     display = ROLE_META[role]["display"]
     stance  = ROLE_META[role]["stance"]
@@ -651,7 +723,7 @@ def build_conclude_prompt(
     return f"""[토론 주제]: {topic}
 [현재 라운드]: Round 3 (최종)
 [당신의 역할]: {display} — {stance} 입장
-{_persona_block(user_persona)}{_horizon_directive(horizon)}{_memory_block(memory_context)}
+{_persona_block(user_persona)}{_horizon_directive(horizon)}{_depth_directive(depth)}{_memory_block(memory_context)}
 {_articles_block(role, articles_common, articles_side)}
 
 {_quant_block(quant_text)}
@@ -791,9 +863,6 @@ def build_convergence_prompt(topic: str, debate_history: list[dict]) -> str:
 # 7. profile 프롬프트 — 설문 응답 → 독자 맞춤 작성 지침
 # ═════════════════════════════════════════════════════════
 SURVEY_LABELS = {
-    "gender":      "성별",
-    "age":         "나이대",
-    "experience":  "투자 기간",
     "level":       "자가 평가 수준",
     "terminology": "용어 숙지도",
     "depth":       "선호 설명 깊이",
@@ -814,9 +883,7 @@ def build_profile_prompt(survey: dict) -> str:
 위 응답을 바탕으로, 이 독자에게 맞춰 토론 발언/결론을 작성할 때 따라야 할 '독자 프로필' 지침을 만드세요.
 
 [작성 규칙]
-- 투자 기간·자가 평가 수준·용어 숙지도·선호 설명 깊이 → 설명의 깊이, 전문용어 사용/풀이 수준, 분석 밀도를 결정하세요.
-- 나이대 → 비유나 예시의 톤에만 가볍게 반영하세요.
-- 성별 → 분석 내용·투자 판단·결론에 절대 영향을 주지 마세요. (성별로 다른 결론이나 논조를 만들지 마세요.)
+- 자가 평가 수준·용어 숙지도·선호 설명 깊이 → 설명의 깊이, 전문용어 사용/풀이 수준, 분석 밀도를 결정하세요.
 - 투자 판단의 객관성은 독자와 무관하게 동일해야 합니다. 달라지는 것은 '전달 방식'뿐입니다.
 - 지침은 3~5개의 간결한 불릿으로, "~하세요" 형태의 실행 지시로 작성하세요.
 

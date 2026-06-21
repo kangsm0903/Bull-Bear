@@ -2,9 +2,6 @@ import { useState } from 'react';
 import { TrendingUp, TrendingDown, Search } from 'lucide-react';
 
 export interface Survey {
-  gender?: string;
-  age?: string;
-  experience?: string;
   level?: string;
   terminology?: string;
   depth?: string;
@@ -16,9 +13,6 @@ interface InputScreenProps {
 }
 
 const SURVEY_QUESTIONS: { field: keyof Survey; label: string; options: string[] }[] = [
-  { field: 'gender',      label: '성별',      options: ['남성', '여성', '응답 안 함'] },
-  { field: 'age',         label: '나이대',    options: ['20대 이하', '30대', '40대', '50대 이상'] },
-  { field: 'experience',  label: '투자 기간', options: ['1년 미만', '1~3년', '3~7년', '7년 이상'] },
   { field: 'level',       label: '개인 수준', options: ['입문자', '개인투자자', '전문가'] },
   { field: 'terminology', label: '용어 숙지', options: ['낮음', '보통', '높음'] },
   { field: 'depth',       label: '설명 깊이', options: ['쉽고 간단', '균형', '심층·정밀'] },

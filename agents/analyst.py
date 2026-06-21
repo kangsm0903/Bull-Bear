@@ -150,6 +150,7 @@ class AnalystAgent(BaseAgent):
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        depth: str = "",
         own_history: str = "",
     ) -> dict:
         prompt = build_argue_prompt(
@@ -163,6 +164,7 @@ class AnalystAgent(BaseAgent):
             user_persona=user_persona,
             persona_tier=persona_tier,
             horizon=horizon,
+            depth=depth,
             own_history=own_history,
         )
         draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["argue"], can_top_up=False, round_num=round_num)
@@ -182,6 +184,7 @@ class AnalystAgent(BaseAgent):
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        depth: str = "",
         own_history: str = "",
     ) -> dict:
         prompt = build_rebut_prompt(
@@ -196,6 +199,7 @@ class AnalystAgent(BaseAgent):
             user_persona=user_persona,
             persona_tier=persona_tier,
             horizon=horizon,
+            depth=depth,
             own_history=own_history,
         )
         draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["rebut"], can_top_up=True, round_num=round_num)
@@ -212,6 +216,7 @@ class AnalystAgent(BaseAgent):
         memory_context: str = "",
         user_persona: str = "",
         horizon: str = "",
+        depth: str = "",
     ) -> dict:
         prompt = build_conclude_prompt(
             role=self.role,
@@ -222,6 +227,7 @@ class AnalystAgent(BaseAgent):
             memory_context=memory_context,
             user_persona=user_persona,
             horizon=horizon,
+            depth=depth,
         )
         draft = self._chat(prompt, temperature=TEMPERATURE["conclude"])
         return self._reflect(draft, prompt)
@@ -241,16 +247,17 @@ class AnalystAgent(BaseAgent):
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        depth: str = "",
         own_history: str = "",
     ) -> dict:
         if action == "argue":
             return self.argue(topic, round_num, articles_common, articles_side,
-                              quant_text, memory_context, user_persona, persona_tier, horizon, own_history)
+                              quant_text, memory_context, user_persona, persona_tier, horizon, depth, own_history)
         if action == "rebut":
             return self.rebut(topic, round_num, opponent_statement,
                               articles_common, articles_side, quant_text,
-                              memory_context, user_persona, persona_tier, horizon, own_history)
+                              memory_context, user_persona, persona_tier, horizon, depth, own_history)
         if action == "conclude":
             return self.conclude(topic, articles_common, articles_side,
-                                 quant_text, memory_context, user_persona, horizon)
+                                 quant_text, memory_context, user_persona, horizon, depth)
         raise ValueError(f"Unknown action: {action}")

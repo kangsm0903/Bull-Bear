@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite \".tables\")",
-      "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite \".schema\")",
-      "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite ' *)"
-    ]
-  }
-}

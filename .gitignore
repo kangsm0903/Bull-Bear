@@ -21,3 +21,31 @@ rag/faiss_store/
 
 frontend/node_modules/
 frontend/dist/
+
+# 실험 스크립트·출력 (로컬 전용, 버전관리 제외)
+ablation*.py
+ablation*.txt
+eval_full_round.py
+full_round_runner.py
+persona_reeval.py
+prompt_eval.py
+test_fewshot_fix.py
+test_memory_only.py
+test_persona.py
+agents/devil_agent.py
+
+# 실행 산출물 (런타임 생성)
+logs/
+eval_runs/
+memory/
+
+# 연구/내부 문서 (비공개)
+AGENTS.md
+EXPERIMENTS.md
+INSIGHTS.md
+docs/portfolio-summary.md
+docs/readme-improvement.md
+
+# Claude Code 로컬 설정/워크트리
+.claude/settings.local.json
+.claude/worktrees/

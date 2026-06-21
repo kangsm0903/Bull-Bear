@@ -42,6 +42,8 @@ def main():
     print(f"\nBear 요약: {mod.get('bear_summary', '')}")
     print(f"\n종합 의견: {mod.get('conclusion', '')}")
     print(f"\n투자 판단: {mod.get('verdict', '')}")
+    if mod.get("data_balance"):
+        print(f"\n근거 균형: {mod.get('data_balance', '')}")
 
     # 사용된 기사 출력
     print(f"\n{'─'*50}")

@@ -683,14 +683,18 @@ def build_moderator_prompt(
 
 위 토론을 종합하여 최종 결론을 JSON 형식으로 제시하세요.
 투자 판단(verdict)은 반드시 다음 중 하나로 명시하세요:
-매수 적극 | 분할 매수 | 관망 | 매도 고려{_persona_directive(user_persona)}
+매수 적극 | 분할 매수 | 관망 | 매도 고려
+
+data_balance에는 토론에서 인용된 근거(기사·정량 지표) 자체가 어느 쪽 입장에 더 유리한지를 1문장으로 적으세요.
+'누가 더 잘 논증했는가'가 아니라 '입력 데이터의 방향성'이며, 양측 근거가 비슷하면 "균형"으로 쓰세요.{_persona_directive(user_persona)}
 
 응답 형식:
 {{
   "bull_summary": "Bull 측 핵심 논거 요약 (2~3문장)",
   "bear_summary": "Bear 측 핵심 리스크 요약 (2~3문장)",
   "conclusion":   "최종 종합 의견 (3~4문장)",
-  "verdict":      "매수 적극 | 분할 매수 | 관망 | 매도 고려"
+  "verdict":      "매수 적극 | 분할 매수 | 관망 | 매도 고려",
+  "data_balance": "근거의 방향성 1문장 (예: 정량 지표는 Bull 측에 유리, 기사 근거는 균형)"
 }}"""
 
 

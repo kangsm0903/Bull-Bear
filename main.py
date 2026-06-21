@@ -104,6 +104,7 @@ def run_debate(req: DebateRequest):
             "bear_summary": mod.get("bear_summary", ""),
             "conclusion":   mod.get("conclusion", ""),
             "verdict":      verdict,
+            "data_balance": mod.get("data_balance", ""),
         },
     }
 

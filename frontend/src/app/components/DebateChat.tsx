@@ -18,6 +18,7 @@ interface Moderator {
   bear_summary: string;
   conclusion:   string;
   verdict:      string;
+  data_balance: string;
 }
 
 export interface DebateData {
@@ -220,6 +221,11 @@ export function DebateChat({ topic, debateData, onBack }: DebateChatProps) {
               <div className="inline-flex items-center px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-300 text-sm font-semibold">
                 {VERDICT_LABEL[moderator.verdict] ?? moderator.verdict}
               </div>
+              {moderator.data_balance && (
+                <p className="mt-3 text-xs text-slate-400 leading-relaxed">
+                  <span className="text-slate-500">근거 균형 · </span>{moderator.data_balance}
+                </p>
+              )}
             </motion.div>
           )}
 

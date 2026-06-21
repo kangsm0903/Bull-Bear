@@ -3,6 +3,7 @@
 > 이 문서는 기존 고정 RAG 파이프라인에 추가한 세 가지 에이전트 기능을 설명한다.
 > ① **Tool calling 기반 자료 조사 방식**(per_step / upfront / hybrid), ② **설문 기반 유저 개인화**(독자 수준 맞춤 톤 + 희망 투자기간별 근거 강조), ③ **환각 방지 가드**(결정적 숫자검증 + Self-Reflection).
 > 모든 내용은 현재 소스 코드 기준이며, 조사 모드 실측 수치는 `compare_research_modes.py`로 재현 가능하다.
+> 신뢰성 5축 점검과 근거 비대칭(data_balance) 노출은 [reliability-and-trust.md](./reliability-and-trust.md)를 참조.
 
 ---
 

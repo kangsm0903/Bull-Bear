@@ -1,9 +1,8 @@
 """
 agents/base_agent.py — OpenAI 호출 공통 기반
 
-[변경 사항 v2]
-- _chat_with_tools에 force_tool 파라미터 추가.
-  지정 시 첫 호출에서 해당 도구를 강제 호출하게 함.
+[변경 사항 v3]
+- 로그에 호출 args(특히 display)와 강제/자율 여부([FORCED]/[AUTO]) 표시.
 """
 
 import json
@@ -111,12 +110,14 @@ class BaseAgent:
         ]
 
         for iteration in range(MAX_TOOL_ITERATIONS + 1):
+            is_forced_turn = (iteration == 0 and bool(force_tool))
+
             # 마지막 반복: 도구 차단 → 무조건 최종 JSON 응답
             if iteration >= MAX_TOOL_ITERATIONS:
                 tools_param = None
                 tool_choice = None
             # 첫 반복 + force_tool 지정 → 강제 호출
-            elif iteration == 0 and force_tool:
+            elif is_forced_turn:
                 tools_param = TOOL_SCHEMAS
                 tool_choice = {"type": "function", "function": {"name": force_tool}}
             # 그 외: 자율 판단
@@ -145,7 +146,12 @@ class BaseAgent:
                     ],
                 })
                 for tc in msg.tool_calls:
-                    result = self._execute_tool(tc.function.name, tc.function.arguments)
+                    result = self._execute_tool(
+                        tc.function.name,
+                        tc.function.arguments,
+                        forced=is_forced_turn,
+                        agent_role=getattr(self, "role", "?"),
+                    )
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -164,15 +170,21 @@ class BaseAgent:
 
     # ─────────────────────────────────────────────────────
     @staticmethod
-    def _execute_tool(name: str, arguments_json: str) -> str:
+    def _execute_tool(name: str, arguments_json: str, forced: bool = False, agent_role: str = "?") -> str:
         fn = TOOL_FUNCTIONS.get(name)
         if not fn:
             return f"[에러] 알 수 없는 tool: {name}"
         try:
             args = json.loads(arguments_json or "{}")
             result = fn(**args)
-            preview = str(args.get("query", ""))[:40]
-            print(f"  🔧 [{name}] {preview} → {len(result)}자")
+
+            tag = "🔒 FORCED" if forced else "🧠 AUTO  "
+            query_preview = str(args.get("query", ""))[:40]
+            display_val = args.get("display", args.get("top_k", "-"))
+            print(
+                f"  🔧 [{tag}] role={agent_role:<5} {name:<20} "
+                f"query=\"{query_preview}\" display={display_val} → {len(result)}자"
+            )
             return result
         except Exception as e:
             return f"[에러] {name} 실행 실패: {e}"

@@ -241,31 +241,44 @@ def _horizon_directive(horizon: str) -> str:
     )
 
 
-def _tools_block(stance: str, action: str = "argue") -> str:
+def _tools_block(stance: str, action: str = "argue", round_num: int = 0) -> str:
     """조사 방식에 따라 발언별 도구 사용 지시를 주입.
 
     - per_step: 모든 발언에서 자료 조사를 '필수'로 지시.
     - hybrid:   사전 조사 근거를 기본 사용하되, rebut에서만 '선택적' 추가 조사 허용.
                 (argue는 사전 조사 근거만 사용하므로 블록 없음)
     - upfront/OFF: 발언 중 도구를 쓰지 않으므로 빈 블록.
+
+    R1(정성 라운드)에서는 fetch_quant(정량) 안내를 빼고 search_articles만 권한다.
+    (실제 도구 노출 차단은 analyst의 tools_for_round로 결정적으로 처리.)
     """
     if not ENABLE_TOOL_CALLING:
         return ""
     if RESEARCH_MODE == "per_step":
+        quant_line = (
+            "- 이 라운드는 정성 분석이므로 fetch_quant(정량 데이터)는 사용하지 말고 search_articles만 사용하세요.\n"
+            if round_num == 1 else
+            "- fetch_quant(ticker): 필요 시 정량 데이터 조회.\n"
+        )
         return (
             "\n━━━ 자료 조사 (필수) ━━━\n"
             f"위 공통 브리핑 외의 side 근거는 별도 리서치 단계에서 수집합니다. {stance} 논거를 뒷받침할 자료를 먼저 조사하세요.\n"
             f"- search_articles(query): 본인({stance}) 입장을 강화하거나 검증할 뉴스를 검색하세요.\n"
-            "- fetch_quant(ticker): 필요 시 정량 데이터 조회.\n"
+            f"{quant_line}"
             "최종 발언은 리서치가 끝난 뒤 작성하고, 찾은 근거에서만 인용하세요. "
             "검색 결과가 비거나 근거가 부족하면 수치를 지어내지 말고 '근거 부족'으로 인정하세요.\n"
         )
     if RESEARCH_MODE == "hybrid" and action == "rebut":
+        tool_line = (
+            "- search_articles(query): 꼭 필요한 경우에만 호출하세요. 이 라운드는 정성 분석이므로 fetch_quant(정량)는 사용하지 마세요.\n"
+            if round_num == 1 else
+            "- search_articles(query) / fetch_quant(ticker): 꼭 필요한 경우에만 호출하세요.\n"
+        )
         return (
             "\n━━━ 자료 조사 (선택) ━━━\n"
             f"위에 이미 사전 조사된 {stance} 측 근거가 제공돼 있습니다. 기본적으로는 이 근거로 반박하세요.\n"
             "다만 상대가 제기한 논점이 사전 근거로 반박되지 않을 때만 추가 조사를 하세요.\n"
-            "- search_articles(query) / fetch_quant(ticker): 꼭 필요한 경우에만 호출하세요.\n"
+            f"{tool_line}"
             "추가 조사가 필요 없으면 도구를 호출하지 말고 바로 반박하세요. 찾은 근거에서만 인용하고, 수치를 지어내지 마세요.\n"
         )
     return ""
@@ -443,6 +456,18 @@ def _memory_block(memory_context: str) -> str:
     return f"\n\n━━━ 과거 토론 참고 ━━━\n{memory_context}\n(위 과거 토론 결과를 참고하되, 이번 토론의 새 데이터를 우선 근거로 사용하세요.)"
 
 
+def _own_history_block(own_history: str) -> str:
+    """이번 토론에서 자신이 이미 한 발언 + 반복 억제 지시(evidence-log 방식)."""
+    if not own_history:
+        return ""
+    return (
+        f"\n\n━━━ 당신이 이번 토론에서 이미 한 발언 ━━━\n{own_history}\n"
+        "위는 당신이 앞선 라운드에서 이미 제시한 논점입니다. "
+        "이미 제시한 핵심 논점·수치(예: PER)는 새로운 근거나 각도 없이 반복하지 말고, "
+        "논의를 다음 단계로 진전시키세요. 동일 수치를 핵심 근거로 다시 꺼내지 마세요."
+    )
+
+
 def _scope_text(round_num: int) -> str:
     if round_num == 1:
         return "정성적 데이터(뉴스 기사)만"
@@ -455,8 +480,8 @@ def _scope_text(round_num: int) -> str:
 def _round_focus(round_num: int, stance: str) -> str:
     if round_num == 1:
         return (
-            "밸류에이션 & 이익 모멘텀 관점에서 논거를 제시하세요. "
-            "현재 주가 수준의 적정성과 실적 개선 추세를 뉴스 근거로 논증하세요."
+            "사업·제품·촉매·정책/규제·경쟁구도·수급 등 정성 관점에서 논거를 제시하세요. "
+            "실적·밸류에이션은 구체 수치 없이 방향과 서사로만 다루세요."
         )
     elif round_num == 2:
         return (
@@ -468,6 +493,26 @@ def _round_focus(round_num: int, stance: str) -> str:
             "촉매제 vs 리스크 관점에서 최종 논거를 완성하세요. "
             f"향후 6~12개월 주가 방향을 결정할 핵심 요인을 {stance} 입장에서 종합 정리하세요."
         )
+
+
+def _evidence_rule(round_num: int) -> str:
+    """라운드별 사용 가능한 근거 종류를 강제. R1은 정성만, R2는 정량, R3+는 통합."""
+    if round_num == 1:
+        return (
+            "- 이 라운드는 정성 분석입니다. 사업·제품·촉매·정책/규제·경쟁구도·수급·투자심리 같은 서사적 근거만 사용하세요.\n"
+            "- 주가·PER·PBR·영업이익률·ROE·부채비율·EPS·목표주가·상승여력·수익률·주가 등락률 등 정량/밸류에이션 수치는 "
+            "기사 본문에 있어도 인용하지 마세요. 수치 대신 '실적 개선 흐름', '수주 모멘텀'처럼 방향과 서사로 서술하세요.\n"
+            "  (예: '주가가 66.78% 급등' → '주가가 큰 폭으로 급등', '영업이익률 2.8%' → '낮은 수익성')"
+        )
+    if round_num == 2:
+        return (
+            "- 반드시 위 정량 데이터에서 구체적 수치를 인용하여 논거를 뒷받침하세요.\n"
+            "- 위 데이터에 없는 수치는 절대 사용하지 마세요."
+        )
+    return (
+        "- 정성 서사와 정량 수치를 함께 사용하되, 위 데이터에서 확인되는 사실만 인용하세요.\n"
+        "- 위 데이터에 없는 수치는 절대 사용하지 마세요."
+    )
 
 
 # ═════════════════════════════════════════════════════════
@@ -484,6 +529,7 @@ def build_argue_prompt(
     user_persona: str = "",
     persona_tier: str = "",
     horizon: str = "",
+    own_history: str = "",
 ) -> str:
     display = ROLE_META[role]["display"]
     stance  = ROLE_META[role]["stance"]
@@ -492,13 +538,12 @@ def build_argue_prompt(
 [현재 라운드]: Round {round_num}
 [당신의 역할]: {display} — {stance} 입장
 {_persona_block(user_persona)}{_horizon_directive(horizon)}{_memory_block(memory_context)}
-{_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "argue")}
+{_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "argue", round_num)}{_own_history_block(own_history)}
 
 {_few_shot_argue(role, persona_tier)}━━━ 지시 ━━━
 이번 라운드는 {_scope_text(round_num)}을 근거로 합니다.
 {_round_focus(round_num, stance)}
-- 반드시 위 데이터에서 구체적 수치/사실을 인용하여 논거를 뒷받침하세요.
-- 위 데이터에 없는 수치(주가, 수익률, 재무 지표 등)는 절대 사용하지 마세요.{_persona_directive(user_persona)}
+{_evidence_rule(round_num)}{_persona_directive(user_persona)}
 {_cot_block_argue(role, stance)}
 반드시 JSON 형식으로 응답하세요:
 {_output_format_argue()}"""
@@ -519,6 +564,7 @@ def build_rebut_prompt(
     user_persona: str = "",
     persona_tier: str = "",
     horizon: str = "",
+    own_history: str = "",
 ) -> str:
     display       = ROLE_META[role]["display"]
     stance        = ROLE_META[role]["stance"]
@@ -532,13 +578,14 @@ def build_rebut_prompt(
 ━━━ 반박해야 할 상대({opponent_disp})의 주장 ━━━
 {opponent_statement}
 
-{_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "rebut")}
+{_data_section(role, articles_common, articles_side, quant_text)}{_tools_block(stance, "rebut", round_num)}{_own_history_block(own_history)}
 
 {_few_shot_rebut(persona_tier)}━━━ 지시 ━━━
 이번 라운드는 {_scope_text(round_num)}을 근거로 합니다.
 위 {opponent_disp}의 주장에 대해 {display}({stance}) 입장에서 반박하세요.
 - 반드시 상대 주장의 구체적 논점을 짚어 반박하세요.
-- 반박 근거는 위 데이터에서만 가져오세요.{_persona_directive(user_persona)}
+- 반박 근거는 위 데이터에서만 가져오세요.
+{_evidence_rule(round_num)}{_persona_directive(user_persona)}
 {_cot_block_rebut(opponent_disp, stance)}
 반드시 JSON 형식으로 응답하세요:
 {_output_format_rebut()}"""

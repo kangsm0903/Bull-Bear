@@ -19,7 +19,7 @@ from agents.config import (
     ROLE_META,
     TEMPERATURE,
 )
-from agents.tools import TOOL_SCHEMAS, cache_key, dispatch
+from agents.tools import TOOL_SCHEMAS, cache_key, dispatch, tools_for_round
 from agents.verifier import verify_numbers
 from agents.prompts import (
     SYSTEM_PROMPTS,
@@ -82,7 +82,7 @@ class AnalystAgent(BaseAgent):
         return articles
 
     # ── LLM 호출 (조사 방식 분기) ───────────────────────
-    def _run_llm(self, prompt: str, temperature: float, can_top_up: bool = False) -> tuple[dict, list, str]:
+    def _run_llm(self, prompt: str, temperature: float, can_top_up: bool = False, round_num: int = 0) -> tuple[dict, list, str]:
         """조사 방식에 따라 발언 전 조사 여부를 결정한 뒤 최종 답변 생성.
 
         - per_step: 모든 발언에서 (필수) 조사.
@@ -98,7 +98,7 @@ class AnalystAgent(BaseAgent):
         if do_research:
             research_text, articles = self._research_with_tools(
                 prompt,
-                TOOL_SCHEMAS,
+                tools_for_round(round_num),
                 dispatch,
                 cache_key,
                 temperature=temperature,
@@ -150,6 +150,7 @@ class AnalystAgent(BaseAgent):
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        own_history: str = "",
     ) -> dict:
         prompt = build_argue_prompt(
             role=self.role,
@@ -162,8 +163,9 @@ class AnalystAgent(BaseAgent):
             user_persona=user_persona,
             persona_tier=persona_tier,
             horizon=horizon,
+            own_history=own_history,
         )
-        draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["argue"], can_top_up=False)
+        draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["argue"], can_top_up=False, round_num=round_num)
         result = self._reflect(draft, eff_prompt)
         result["researched_articles"] = articles
         return result
@@ -180,6 +182,7 @@ class AnalystAgent(BaseAgent):
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        own_history: str = "",
     ) -> dict:
         prompt = build_rebut_prompt(
             role=self.role,
@@ -193,8 +196,9 @@ class AnalystAgent(BaseAgent):
             user_persona=user_persona,
             persona_tier=persona_tier,
             horizon=horizon,
+            own_history=own_history,
         )
-        draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["rebut"], can_top_up=True)
+        draft, articles, eff_prompt = self._run_llm(prompt, TEMPERATURE["rebut"], can_top_up=True, round_num=round_num)
         result = self._reflect(draft, eff_prompt)
         result["researched_articles"] = articles
         return result
@@ -237,14 +241,15 @@ class AnalystAgent(BaseAgent):
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        own_history: str = "",
     ) -> dict:
         if action == "argue":
             return self.argue(topic, round_num, articles_common, articles_side,
-                              quant_text, memory_context, user_persona, persona_tier, horizon)
+                              quant_text, memory_context, user_persona, persona_tier, horizon, own_history)
         if action == "rebut":
             return self.rebut(topic, round_num, opponent_statement,
                               articles_common, articles_side, quant_text,
-                              memory_context, user_persona, persona_tier, horizon)
+                              memory_context, user_persona, persona_tier, horizon, own_history)
         if action == "conclude":
             return self.conclude(topic, articles_common, articles_side,
                                  quant_text, memory_context, user_persona, horizon)

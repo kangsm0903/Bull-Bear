@@ -63,6 +63,13 @@ TOOL_SCHEMAS = [
 ]
 
 
+def tools_for_round(round_num: int) -> list:
+    """R1(정성 라운드)에서는 정량 도구(fetch_quant)를 노출하지 않아 정성 근거만 조사하게 한다."""
+    if round_num == 1:
+        return [s for s in TOOL_SCHEMAS if s["function"]["name"] != "fetch_quant"]
+    return TOOL_SCHEMAS
+
+
 def _format_articles(results: list[dict]) -> str:
     if not results:
         return "(검색 결과 없음)"

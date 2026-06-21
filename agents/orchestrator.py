@@ -133,6 +133,7 @@ class DebateOrchestrator:
                     user_persona=user_persona,
                     persona_tier=persona_tier,
                     horizon=horizon,
+                    prior_rounds=all_rounds,
                 )
                 all_rounds.append(round_msgs)
                 if on_round_complete:
@@ -196,6 +197,7 @@ class DebateOrchestrator:
         user_persona: str = "",
         persona_tier: str = "",
         horizon: str = "",
+        prior_rounds: list[list[dict]] | None = None,
     ) -> list[dict]:
         """한 라운드 실행. 의존성 레벨별로 병렬 호출."""
         round_num = round_cfg["round"]
@@ -228,6 +230,7 @@ class DebateOrchestrator:
                 user_persona=user_persona,
                 persona_tier=persona_tier,
                 horizon=horizon,
+                own_history=_own_history(prior_rounds, role),
             )
 
         # 의존성 레벨 계산
@@ -290,6 +293,7 @@ class DebateOrchestrator:
                 user_persona=user_persona,
                 persona_tier=persona_tier,
                 horizon=horizon,
+                prior_rounds=all_rounds,
             )
             all_rounds.append(round_msgs)
             if on_round_complete:
@@ -366,6 +370,18 @@ def _flatten_history(all_rounds: list[list[dict]]) -> list[dict]:
         {"round": m["round"], "role": m["role"].capitalize(), "content": m["content"]}
         for round_msgs in all_rounds for m in round_msgs
     ]
+def _own_history(prior_rounds: list[list[dict]] | None, role: str) -> str:
+    """이전 라운드에서 해당 role이 직접 한 발언만 모아 압축 문자열로 (반복 억제용)."""
+    if not prior_rounds:
+        return ""
+    lines = [
+        f"[R{m.get('round')} {m.get('kind', '')}] {m['content']}"
+        for round_msgs in prior_rounds for m in round_msgs
+        if m.get("role") == role and m.get("content")
+    ]
+    return "\n\n".join(lines)
+
+
 def _find_step(steps: list[dict], target_role: str, target_action: str) -> int | None:
     """주어진 (role, action)에 매칭되는 step의 index 반환."""
     for i, s in enumerate(steps):

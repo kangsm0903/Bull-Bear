@@ -7,6 +7,8 @@ agents/prompts.py — 프롬프트 텍스트 전용 모듈
 프롬프트를 튜닝/실험할 때는 이 파일만 수정하면 됩니다.
 """
 
+import re
+
 from agents.config import (
     ROLE_META,
     ENABLE_COT,
@@ -180,18 +182,26 @@ def resolve_persona_tier(user_persona: str = "", survey: dict | None = None) -> 
     return PRESET_TIER.get(user_persona, "")
 
 
+def _maybe_strip_reasoning(example: str) -> str:
+    """CoT가 꺼져 있으면 예시의 reasoning 필드를 제거해 실제 출력 스키마(content+tags)와 일치시킨다.
+    (불일치 시 모델이 reasoning의 '1. 2. 3.' 단계 표기를 content에 흘려넣는 문제 방지.)"""
+    if ENABLE_COT:
+        return example
+    return re.sub(r'[ \t]*"reasoning": ".*?",\n', '', example)
+
+
 def _few_shot_argue(role: str, persona_tier: str = "") -> str:
     if not ENABLE_FEW_SHOT:
         return ""
     examples = _FEW_SHOT_ARGUE_PLAIN if persona_tier == "beginner" else _FEW_SHOT_ARGUE
-    return f"\n{examples.get(role, '')}\n"
+    return f"\n{_maybe_strip_reasoning(examples.get(role, ''))}\n"
 
 
 def _few_shot_rebut(persona_tier: str = "") -> str:
     if not ENABLE_FEW_SHOT:
         return ""
     example = _FEW_SHOT_REBUT_PLAIN if persona_tier == "beginner" else _FEW_SHOT_REBUT
-    return f"\n{example}\n"
+    return f"\n{_maybe_strip_reasoning(example)}\n"
 
 
 def _persona_block(user_persona: str) -> str:
@@ -500,8 +510,8 @@ def _evidence_rule(round_num: int) -> str:
     if round_num == 1:
         return (
             "- 이 라운드는 정성 분석입니다. 사업·제품·촉매·정책/규제·경쟁구도·수급·투자심리 같은 서사적 근거만 사용하세요.\n"
-            "- 주가·PER·PBR·영업이익률·ROE·부채비율·EPS·목표주가·상승여력·수익률·주가 등락률 등 정량/밸류에이션 수치는 "
-            "기사 본문에 있어도 인용하지 마세요. 수치 대신 '실적 개선 흐름', '수주 모멘텀'처럼 방향과 서사로 서술하세요.\n"
+            "- 답변에 어떤 정량 수치도(%, 배, 원·만원, 주가·등락률·PER·PBR·ROE·영업이익률·부채비율·목표주가·상승여력 등) "
+            "포함하지 마세요. 기사 본문에 숫자가 있어도 인용하지 말고 방향·서사로만 서술하세요.\n"
             "  (예: '주가가 66.78% 급등' → '주가가 큰 폭으로 급등', '영업이익률 2.8%' → '낮은 수익성')"
         )
     if round_num == 2:

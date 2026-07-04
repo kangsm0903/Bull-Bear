@@ -33,4 +33,12 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  server: {
+    // 개발 모드 프록시: /api/* 요청을 Spring Boot(:8080)로 전달
+    // (배포 시에는 리버스 프록시/정적 서빙으로 대체)
+    proxy: {
+      '/api': 'http://localhost:8080',
+    },
+  },
 })

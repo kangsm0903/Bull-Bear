@@ -41,6 +41,7 @@ class AnalystAgent(BaseAgent):
         articles_common: list[dict],
         articles_side: list[dict],
         quant_text: str = "",
+        survey: dict | None = None,
     ) -> dict:
         prompt = build_argue_prompt(
             role=self.role,
@@ -49,6 +50,7 @@ class AnalystAgent(BaseAgent):
             articles_common=articles_common,
             articles_side=articles_side,
             quant_text=quant_text,
+            survey=survey,
         )
         return self._chat(prompt, temperature=TEMPERATURE["argue"])
 
@@ -60,6 +62,7 @@ class AnalystAgent(BaseAgent):
         articles_common: list[dict],
         articles_side: list[dict],
         quant_text: str = "",
+        survey: dict | None = None,
     ) -> dict:
         prompt = build_rebut_prompt(
             role=self.role,
@@ -69,6 +72,7 @@ class AnalystAgent(BaseAgent):
             articles_common=articles_common,
             articles_side=articles_side,
             quant_text=quant_text,
+            survey=survey,
         )
         return self._chat(prompt, temperature=TEMPERATURE["rebut"])
 
@@ -78,6 +82,7 @@ class AnalystAgent(BaseAgent):
         articles_common: list[dict],
         articles_side: list[dict],
         quant_text: str,
+        survey: dict | None = None,
     ) -> dict:
         prompt = build_conclude_prompt(
             role=self.role,
@@ -85,6 +90,7 @@ class AnalystAgent(BaseAgent):
             articles_common=articles_common,
             articles_side=articles_side,
             quant_text=quant_text,
+            survey=survey,
         )
         return self._chat(prompt, temperature=TEMPERATURE["conclude"])
 
@@ -99,12 +105,13 @@ class AnalystAgent(BaseAgent):
         articles_side: list[dict],
         quant_text: str,
         opponent_statement: str = "",
+        survey: dict | None = None,
     ) -> dict:
         if action == "argue":
-            return self.argue(topic, round_num, articles_common, articles_side, quant_text)
+            return self.argue(topic, round_num, articles_common, articles_side, quant_text, survey)
         if action == "rebut":
             return self.rebut(topic, round_num, opponent_statement,
-                              articles_common, articles_side, quant_text)
+                              articles_common, articles_side, quant_text, survey)
         if action == "conclude":
-            return self.conclude(topic, articles_common, articles_side, quant_text)
+            return self.conclude(topic, articles_common, articles_side, quant_text, survey)
         raise ValueError(f"Unknown action: {action}")

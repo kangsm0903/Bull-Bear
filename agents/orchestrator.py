@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from agents.analyst import AnalystAgent
 from agents.moderator import ModeratorAgent
-from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE, RECENT_POOL, SENTIMENT_WEIGHT
+from agents.config import DEBATE_FLOW, TOP_K_COMMON, TOP_K_SIDE, RECENT_POOL, SENTIMENT_WEIGHT, RECENCY_WEIGHT
 from agents.prompts import CONTENT_FIELDS
 from agents.query_expander import expand_query
 from rag.retriever import search, _detect_ticker
@@ -34,15 +34,15 @@ class DebateOrchestrator:
         self.moderator = ModeratorAgent()
 
     # ─────────────────────────────────────────────────────
-    def run(self, topic: str, on_round_complete=None) -> dict:
+    def run(self, topic: str, survey: dict | None = None, on_round_complete=None) -> dict:
         # ── 1. 데이터 준비 ────────────────────────────
         queries = expand_query(topic)
         articles_common = search(queries["common"], source="articles", top_k=TOP_K_COMMON, recent_pool=RECENT_POOL,
-                                 bias=None,   sentiment_weight=SENTIMENT_WEIGHT)
+                                 bias=None,   sentiment_weight=SENTIMENT_WEIGHT, recency_weight=RECENCY_WEIGHT)
         articles_bull   = search(queries["bull"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL,
-                                 bias="bull", sentiment_weight=SENTIMENT_WEIGHT)
+                                 bias="bull", sentiment_weight=SENTIMENT_WEIGHT, recency_weight=RECENCY_WEIGHT)
         articles_bear   = search(queries["bear"],   source="articles", top_k=TOP_K_SIDE,   recent_pool=RECENT_POOL,
-                                 bias="bear", sentiment_weight=SENTIMENT_WEIGHT)
+                                 bias="bear", sentiment_weight=SENTIMENT_WEIGHT, recency_weight=RECENCY_WEIGHT)
 
         detected_ticker = _detect_ticker(topic)
         quant_data = fetch_quant(detected_ticker) if detected_ticker else None
@@ -62,6 +62,7 @@ class DebateOrchestrator:
                 articles_common=articles_common,
                 articles_by_side=articles_by_side,
                 quant_text=quant_text,
+                survey=survey,
             )
             all_rounds.append(round_msgs)
             if on_round_complete:
@@ -97,6 +98,7 @@ class DebateOrchestrator:
         articles_common: list[dict],
         articles_by_side: dict[str, list[dict]],
         quant_text: str,
+        survey: dict | None = None,
     ) -> list[dict]:
         """한 라운드 실행. 의존성 레벨별로 병렬 호출."""
         round_num = round_cfg["round"]
@@ -125,6 +127,7 @@ class DebateOrchestrator:
                 articles_side=articles_by_side[role] if use_articles else [],
                 quant_text=eff_quant_text,
                 opponent_statement=opponent_statement,
+                survey=survey,
             )
 
         # 의존성 레벨 계산

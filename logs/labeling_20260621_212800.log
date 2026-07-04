@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/sungmin/Desktop/05_SW_Lecture/BullBear/collection/sentiment_labeler.py", line 25, in <module>
+    from agents.config import SENTIMENT_MODEL
+  File "/Users/sungmin/Desktop/05_SW_Lecture/BullBear/agents/__init__.py", line 1, in <module>
+    from agents.orchestrator import DebateOrchestrator
+  File "/Users/sungmin/Desktop/05_SW_Lecture/BullBear/agents/orchestrator.py", line 23, in <module>
+    from rag.retriever import search, _detect_ticker
+  File "/Users/sungmin/Desktop/05_SW_Lecture/BullBear/rag/retriever.py", line 9, in <module>
+    import faiss
+ModuleNotFoundError: No module named 'faiss'

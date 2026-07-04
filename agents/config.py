@@ -48,6 +48,13 @@ RECENT_POOL  = 30  # 종목별 최신 후보 풀 크기 (published_at 내림차�
 #   유사도가 보통 0.3~0.5 범위이므로 0.1~0.2 권장.
 SENTIMENT_WEIGHT = 0.15
 
+# 최신성(time-decay) 보정 가중치.
+#   최종점수 = 유사도 + SENTIMENT_WEIGHT × bias부호 × 감성점수 + RECENCY_WEIGHT × 최신성(0~1)
+#   최신성 = 후보 풀 내에서 가장 오래된 기사 0 ~ 가장 최근 기사 1로 정규화.
+#   유사도가 비슷한 기사끼리는 더 최근 것을 우대 → bull/bear 날짜 쏠림 완화.
+#   0이면 최신성 무시(순수 유사도+감성). 유사도 범위(0.3~0.5) 고려해 0.1 권장.
+RECENCY_WEIGHT = 0.1
+
 # 감성 라벨링용 LLM 모델 (collection/sentiment_labeler.py가 사용).
 # 기사별 호재/악재 점수를 미리 매겨 DB에 저장하는 1회성 작업이라 저렴한 모델로 충분.
 SENTIMENT_MODEL = "gpt-4o-mini"

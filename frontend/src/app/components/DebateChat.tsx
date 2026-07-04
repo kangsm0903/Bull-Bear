@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DebateMessage } from './DebateMessage';
 import { ArticleReference, Article } from './ArticleReference';
 import { ArrowLeft, Activity, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
@@ -18,6 +18,7 @@ interface Moderator {
   bear_summary: string;
   conclusion:   string;
   verdict:      string;
+  data_balance: string;
 }
 
 export interface DebateData {
@@ -35,21 +36,23 @@ interface DebateChatProps {
 }
 
 const VERDICT_LABEL: Record<string, string> = {
-  '적극 매수': '🚀 Strong Buy',
-  '매수':      '📈 Buy',
-  '분할 매수': '📊 Accumulate',
+  '매수 적극': '🚀 Strong Buy',
+  '분할 매수': '📈 Accumulate',
   '관망':      '👀 Hold / Watch',
-  '비중 축소': '📉 Reduce',
-  '매도 고려': '⚠️ Consider Sell',
-  '적극 매도': '🔻 Strong Sell',
+  '매도 고려': '📉 Consider Sell',
 };
 
 export function DebateChat({ topic, debateData, onBack }: DebateChatProps) {
   const [visibleMessages, setVisibleMessages] = useState<Message[]>([]);
   const [showModerator, setShowModerator]     = useState(false);
   const [isPlaying, setIsPlaying]             = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { messages, articles, bull_score, bear_score, moderator } = debateData;
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [visibleMessages, showModerator]);
 
   // 메시지를 1.5초 간격으로 순차 출력
   useEffect(() => {
@@ -218,8 +221,15 @@ export function DebateChat({ topic, debateData, onBack }: DebateChatProps) {
               <div className="inline-flex items-center px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-300 text-sm font-semibold">
                 {VERDICT_LABEL[moderator.verdict] ?? moderator.verdict}
               </div>
+              {moderator.data_balance && (
+                <p className="mt-3 text-xs text-slate-400 leading-relaxed">
+                  <span className="text-slate-500">근거 균형 · </span>{moderator.data_balance}
+                </p>
+              )}
             </motion.div>
           )}
+
+          <div ref={messagesEndRef} />
         </div>
       </div>
 

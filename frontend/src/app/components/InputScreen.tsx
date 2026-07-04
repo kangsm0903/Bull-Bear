@@ -1,13 +1,32 @@
 import { useState } from 'react';
 import { TrendingUp, TrendingDown, Search } from 'lucide-react';
 
-interface InputScreenProps {
-  onStartDebate: (topic: string) => void;
+export interface Survey {
+  level?: string;
+  terminology?: string;
+  depth?: string;
+  horizon?: string;
 }
+
+interface InputScreenProps {
+  onStartDebate: (topic: string, survey: Survey) => void;
+}
+
+const SURVEY_QUESTIONS: { field: keyof Survey; label: string; options: string[] }[] = [
+  { field: 'level',       label: '개인 수준', options: ['입문자', '개인투자자', '전문가'] },
+  { field: 'terminology', label: '용어 숙지', options: ['낮음', '보통', '높음'] },
+  { field: 'depth',       label: '설명 깊이', options: ['쉽고 간단', '균형', '심층·정밀'] },
+  { field: 'horizon',     label: '희망 투자 기간', options: ['단기', '중기', '장기'] },
+];
 
 export function InputScreen({ onStartDebate }: InputScreenProps) {
   const [topic, setTopic] = useState('');
   const [focusedExample, setFocusedExample] = useState<number | null>(null);
+  const [survey, setSurvey] = useState<Survey>({});
+
+  const toggleField = (field: keyof Survey, value: string) => {
+    setSurvey((prev) => ({ ...prev, [field]: prev[field] === value ? undefined : value }));
+  };
 
   const exampleTopics = [
     { ticker: '005930', name: '삼성전자',   topic: 'HBM·파운드리 수익성 회복 가능성',  sentiment: 'bullish' },
@@ -19,7 +38,7 @@ export function InputScreen({ onStartDebate }: InputScreenProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (topic.trim()) {
-      onStartDebate(topic.trim());
+      onStartDebate(topic.trim(), survey);
     }
   };
 
@@ -100,6 +119,43 @@ export function InputScreen({ onStartDebate }: InputScreenProps) {
               </div>
             </div>
 
+            {/* Reader Profile Survey (optional) */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+                  독자 프로필 <span className="text-slate-600 normal-case">(선택 — 답변 수준이 맞춰집니다)</span>
+                </p>
+                <div className="h-px flex-1 ml-4 bg-gradient-to-r from-white/10 to-transparent" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 p-5 bg-white/5 border border-white/10 rounded-xl">
+                {SURVEY_QUESTIONS.map((q) => (
+                  <div key={q.field} className="space-y-2">
+                    <p className="text-xs text-slate-500">{q.label}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {q.options.map((opt) => {
+                        const selected = survey[q.field] === opt;
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => toggleField(q.field, opt)}
+                            className={`px-3 py-1.5 rounded-lg text-sm transition-all border ${
+                              selected
+                                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                                : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-300'
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Example Topics */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -127,6 +183,9 @@ export function InputScreen({ onStartDebate }: InputScreenProps) {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-lg font-bold text-white">{example.ticker}</span>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            example.sentiment === 'bullish' ? 'bg-emerald-500' : 'bg-slate-500'
+                          }`} />
                         </div>
                         <p className="text-sm text-slate-400">{example.name}</p>
                       </div>

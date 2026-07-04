@@ -10,7 +10,7 @@ import requests
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "identifier.sqlite"
 DART_FINANCIALS_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"
 

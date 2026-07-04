@@ -7,9 +7,9 @@ import FinanceDataReader as fdr
 from dotenv import load_dotenv
 from datetime import timedelta
 
-load_dotenv(Path(__file__).with_name(".env"))
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-DB_PATH = Path(__file__).with_name("identifier.sqlite")
+DB_PATH = Path(__file__).resolve().parent.parent / "identifier.sqlite"
 
 
 def safe_int(val, default=None):

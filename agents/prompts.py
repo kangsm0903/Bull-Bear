@@ -133,6 +133,21 @@ CONTENT_FIELDS = {action: list(spec) for action, spec in FIELDS.items()}
 SCOPE = {1: "정성 데이터(뉴스 기사)", 2: "정량 데이터(재무/컨센서스/주가)", 3: "정성+정량 데이터"}
 
 
+def _fmt_survey(survey: dict | None) -> str:
+    if not survey:
+        return ""
+    labels = {
+        "level":       "독자 수준",
+        "terminology": "용어 숙지",
+        "depth":       "설명 깊이",
+        "horizon":     "투자 기간",
+    }
+    parts = [f"{labels[k]}: {v}" for k, v in survey.items() if k in labels and v]
+    if not parts:
+        return ""
+    return "[독자 프로필] " + " | ".join(parts) + "\n이 프로필에 맞게 설명 수준과 용어 난이도를 조절하세요.\n"
+
+
 def _fmt_articles(articles: list[dict]) -> str:
     if not articles:
         return "  (관련 기사 없음)"
@@ -168,18 +183,19 @@ def _schema(action: str) -> str:
 
 
 # ── 빌더 ─────────────────────────────────────────────────────
-def build_argue_prompt(role, topic, round_num, articles_common, articles_side, quant_text=""):
+def build_argue_prompt(role, topic, round_num, articles_common, articles_side, quant_text="", survey=None):
     guide = GUIDES["argue"].format(
         display=ROLE_META[role]["display"],
         stance=ROLE_META[role]["stance"],
         scope=SCOPE[round_num],
     )
+    survey_text = _fmt_survey(survey)
     return f"""[토론 주제] {topic}  ·  Round {round_num}
 
 {_context(role, articles_common, articles_side, quant_text)}
 
 ━━━ 지시 ━━━
-{guide}
+{survey_text}{guide}
 {_field_lines("argue")}
 
 JSON으로만 응답:
@@ -187,7 +203,7 @@ JSON으로만 응답:
 
 
 def build_rebut_prompt(role, topic, round_num, opponent_statement,
-                       articles_common, articles_side, quant_text=""):
+                       articles_common, articles_side, quant_text="", survey=None):
     opponent = ROLE_META["bear" if role == "bull" else "bull"]["display"]
     guide = GUIDES["rebut"].format(
         display=ROLE_META[role]["display"],
@@ -195,6 +211,7 @@ def build_rebut_prompt(role, topic, round_num, opponent_statement,
         scope=SCOPE[round_num],
         opponent=opponent,
     )
+    survey_text = _fmt_survey(survey)
     return f"""[토론 주제] {topic}  ·  Round {round_num}
 
 ━━━ 반박 대상: {opponent}의 주장 ━━━
@@ -203,24 +220,25 @@ def build_rebut_prompt(role, topic, round_num, opponent_statement,
 {_context(role, articles_common, articles_side, quant_text)}
 
 ━━━ 지시 ━━━
-{guide}
+{survey_text}{guide}
 {_field_lines("rebut")}
 
 JSON으로만 응답:
 {_schema("rebut")}"""
 
 
-def build_conclude_prompt(role, topic, articles_common, articles_side, quant_text):
+def build_conclude_prompt(role, topic, articles_common, articles_side, quant_text, survey=None):
     guide = GUIDES["conclude"].format(
         display=ROLE_META[role]["display"],
         stance=ROLE_META[role]["stance"],
     )
+    survey_text = _fmt_survey(survey)
     return f"""[토론 주제] {topic}  ·  Round 3 (최종)
 
 {_context(role, articles_common, articles_side, quant_text)}
 
 ━━━ 지시 ━━━
-{guide}
+{survey_text}{guide}
 {_field_lines("conclude")}
 
 JSON으로만 응답:

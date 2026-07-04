@@ -9,7 +9,17 @@
       "Bash(sqlite3 identifier.sqlite \"SELECT COUNT\\(*\\) FROM articles WHERE sentiment IS NOT NULL;\")",
       "Bash(sqlite3 identifier.sqlite \"PRAGMA table_info\\(articles\\);\")",
       "Bash(awk -F'|' '{print \" \"$2\" \\(\"$3\"\\)\"}')",
-      "Bash(sqlite3 identifier.sqlite \"SELECT COUNT\\(*\\) AS 라벨됨, \\(SELECT COUNT\\(*\\) FROM articles\\) AS 전체 FROM articles WHERE sentiment IS NOT NULL;\")"
+      "Bash(sqlite3 identifier.sqlite \"SELECT COUNT\\(*\\) AS 라벨됨, \\(SELECT COUNT\\(*\\) FROM articles\\) AS 전체 FROM articles WHERE sentiment IS NOT NULL;\")",
+      "Bash(sqlite3 identifier.sqlite \"SELECT COUNT\\(*\\) AS 전체, MAX\\(published_at\\) AS 최신 FROM articles;\")",
+      "Bash(awk '/^## SK하이닉스/{f=1} f{print} /^## /{if\\(f && !/SK하이닉스/\\)exit}' results/retrieval_results_NEW.md)",
+      "Bash(sqlite3 identifier.sqlite \":*)",
+      "Bash(ls rag/*.py collection/*.py)",
+      "Bash(source myenv/bin/activate)",
+      "Bash(python -m collection.naver_news_crawling --limit 250)",
+      "Bash(tee /tmp/crawl.log)",
+      "Bash(sqlite3 identifier.sqlite \"SELECT COUNT\\(*\\) total, SUM\\(faiss_id IS NULL\\) new_uningested FROM articles;\")",
+      "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/identifier.sqlite \"SELECT MAX\\(date\\) FROM quant_daily; SELECT MAX\\(date\\) FROM macro_daily;\")",
+      "Bash(sqlite3 /Users/sungmin/Desktop/05_SW_Lecture/BullBear/collection/identifier.sqlite \".tables\")"
     ]
   }
 }

@@ -3,6 +3,7 @@
 """
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import faiss
@@ -10,6 +11,7 @@ import numpy as np
 
 from rag.embedder import embed_query
 from rag.sentiment import sentiment_score
+from rag.sentiment_ml import predict_sentiment
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "identifier.sqlite"
@@ -113,7 +115,9 @@ def _name_aliases(corp_name: str) -> list[str]:
     # 수동 별칭
     aliases.extend(MANUAL_ALIASES.get(corp_name, []))
     # 3자 미만 별칭 제거 + 중복 제거
-    return list(dict.fromkeys(a for a in aliases if len(a) >= 3))
+    result = list(dict.fromkeys(a for a in aliases if len(a) >= 3))
+    # 모두 걸러져 비면(예: "기아","SK" 등 2자 종목명) 정식명이라도 사용 (빈 필터 방지)
+    return result or [corp_name]
 
 
 def _load_index(source: str) -> faiss.Index:
@@ -133,7 +137,8 @@ def _fetch_articles(faiss_ids: list[int]) -> list[dict]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(f"""
             SELECT a.faiss_id, a.ticker, c.corp_name,
-                   a.title, a.content, a.source, a.published_at, a.url, a.sentiment
+                   a.title, a.content, a.source, a.published_at, a.url,
+                   a.sentiment, a.sentiment_ml
             FROM articles a
             JOIN companies c ON a.ticker = c.ticker
             WHERE a.faiss_id IN ({placeholders})
@@ -210,12 +215,32 @@ def _recent_faiss_ids(ticker: str | None, pool_size: int) -> list[int]:
 
 
 def _get_sentiment(a: dict) -> float:
-    """기사의 감성 점수. LLM이 미리 채점해 저장한 값(sentiment)을 우선 사용하고,
-    아직 라벨링 안 된 기사는 단어 사전(sentiment_score)으로 폴백."""
+    """기사의 감성 점수. 우선순위:
+      1) DB에 저장된 LLM 라벨(sentiment) — 기존 기사
+      2) DB에 저장된 ML 라벨(sentiment_ml) — label_with_ml.py가 미리 채운 값
+      3) ML 모델 즉석 예측(predict_sentiment) — 컬럼이 비어있는 새 기사
+      4) 단어 사전(sentiment_score) — 모델 파일이 없을 때의 최종 폴백
+    """
     s = a.get("sentiment")
     if s is not None:
         return float(s)
+    s_ml = a.get("sentiment_ml")
+    if s_ml is not None:
+        return float(s_ml)
+    ml_s = predict_sentiment(a.get("title"), a.get("content"))
+    if ml_s is not None:
+        return ml_s
     return sentiment_score(a.get("title"), a.get("content"))
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    """published_at("YYYY-MM-DD HH:MM:SS") 파싱. 실패 시 None."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
 
 
 def _rank_pool(
@@ -225,8 +250,9 @@ def _rank_pool(
     top_k: int,
     bias: str | None = None,        # "bull" | "bear" | None
     sentiment_weight: float = 0.0,
+    recency_weight: float = 0.0,
 ) -> list[dict]:
-    """후보 풀(pool_ids)을 query 유사도 + 감성 보정으로 정렬해 top_k 기사 반환.
+    """후보 풀(pool_ids)을 query 유사도 + 감성 + 최신성 보정으로 정렬해 top_k 기사 반환.
 
     감성 필터 (bias가 bull/bear일 때):
         · bias="bull" → 호재(sent > 0) 기사만 통과, 부호 +1로 가산
@@ -234,7 +260,12 @@ def _rank_pool(
         · 중립(sent == 0)은 양쪽 모두 제외 → 해당 진영 기사가 부족하면 적게/비워서 반환
         · bias=None(common) → 필터·가산 없음, 순수 유사도로 전부 후보
 
+    최신성 보정 (recency_weight > 0):
+        · 후보 풀 내 published_at을 0(최오래)~1(최신)로 정규화해 가산
+        · 유사도가 비슷한 기사끼리 더 최근 것을 우대 → bull/bear 날짜 쏠림 완화
+
         최종점수 = cosine 유사도 + sentiment_weight × bias부호 × 감성점수(-1~1)
+                            + recency_weight × 최신성(0~1)
 
     IndexFlatIP.reconstruct로 빌드 시 정규화된 벡터를 되찾아 내적(=cosine)을 계산한다.
     각 기사 dict에는 'score'(순수 유사도)를 기록한다.
@@ -246,6 +277,13 @@ def _rank_pool(
     ntotal = index.ntotal
 
     articles = _fetch_articles(pool_ids)   # 텍스트(title/content) 포함
+
+    # 최신성 정규화용 풀 내 시간 범위 (필터 전 전체 풀 기준이라 스케일이 안정적)
+    times = {a["faiss_id"]: _parse_dt(a.get("published_at")) for a in articles}
+    valid_t = [t for t in times.values() if t is not None]
+    tmin = min(valid_t) if valid_t else None
+    span = (max(valid_t) - tmin).total_seconds() if (valid_t and max(valid_t) > tmin) else 0.0
+
     ranked: list[tuple[float, dict]] = []
     for a in articles:
         fid = a["faiss_id"]
@@ -262,6 +300,10 @@ def _rank_pool(
             if bias_sign < 0 and sent >= 0:
                 continue
             final = sim + sentiment_weight * bias_sign * sent
+        if recency_weight and span:
+            t = times.get(fid)
+            if t is not None:
+                final += recency_weight * ((t - tmin).total_seconds() / span)
         ranked.append((final, a))
 
     ranked.sort(key=lambda x: x[0], reverse=True)
@@ -277,6 +319,7 @@ def search(
     recent_pool: int = 30,      # 하이브리드 최신 후보 풀 크기 (앱에서는 config.RECENT_POOL 주입)
     bias: str = None,           # "bull"|"bear"|None — 감성 보정 방향
     sentiment_weight: float = 0.0,  # 감성 가중치 (앱에서는 config.SENTIMENT_WEIGHT 주입)
+    recency_weight: float = 0.0,    # 최신성 가중치 (앱에서는 config.RECENCY_WEIGHT 주입)
 ) -> list[dict]:
     """
     query를 임베딩해 FAISS로 유사 문서를 검색하고 SQLite 메타데이터를 반환
@@ -314,6 +357,7 @@ def search(
             return _rank_pool(
                 index, query_vec, pool_ids, top_k,
                 bias=bias, sentiment_weight=sentiment_weight,
+                recency_weight=recency_weight,
             )
         # 풀이 비면(=해당 종목 faiss_id 없음) 아래 전역 검색으로 폴백
 

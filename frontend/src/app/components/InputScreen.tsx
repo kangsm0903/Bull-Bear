@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { TrendingUp, TrendingDown, Search } from 'lucide-react';
 
 export interface Survey {
-  level?: string;
-  terminology?: string;
   depth?: string;
   horizon?: string;
 }
@@ -13,10 +11,8 @@ interface InputScreenProps {
 }
 
 const SURVEY_QUESTIONS: { field: keyof Survey; label: string; options: string[] }[] = [
-  { field: 'level',       label: '개인 수준', options: ['입문자', '개인투자자', '전문가'] },
-  { field: 'terminology', label: '용어 숙지', options: ['낮음', '보통', '높음'] },
-  { field: 'depth',       label: '설명 깊이', options: ['쉽고 간단', '균형', '심층·정밀'] },
-  { field: 'horizon',     label: '희망 투자 기간', options: ['단기', '중기', '장기'] },
+  { field: 'depth',   label: '설명 깊이', options: ['쉽고 간단', '균형', '심층·정밀'] },
+  { field: 'horizon', label: '희망 투자 기간', options: ['단기', '중기', '장기'] },
 ];
 
 export function InputScreen({ onStartDebate }: InputScreenProps) {

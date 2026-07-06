@@ -14,21 +14,18 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 토론 API 진입점.
- *
- * @RestController = @Controller + @ResponseBody.
- *   반환 객체를 뷰(HTML)가 아니라 JSON으로 직렬화해 응답한다.
- * @RequestBody: HTTP 요청 바디의 JSON을 DebateRequest 객체로 역직렬화(Jackson).
- *
- * [Week 1] 지금은 하드코딩 목업 응답. UI ↔ Spring 연결 검증이 목적.
- * [Week 2] 이 안을 Python AI 서비스(FastAPI :8001) 호출로 교체 예정.
+ * 주문 받는 창구 직원
  */
-@RestController
-@RequestMapping("/api")
+@RestController             // 화면(HTML)말고 데이터(JSON)을 주는 창구라는 표시
+@RequestMapping("/api")     // 내 주소는 /api로 시작
+
 public class DebateController {
 
-    @PostMapping("/debate")
+    @PostMapping("/debate") // /api/debate 주소로 오는 주문을 받겠다
     public DebateResponse debate(@RequestBody DebateRequest request) {
+        // 유저가 보낸 JSON을 DebateRequest에 담아서 request란 이름으로 나에게 전달
+        // @RequestBody: header-json으로 겉면의 정보, body-진짜 알맹이 데이터로 body의 정보를 꺼내서 담으라는 뜻
+        // @RequestBody 자체는 명령이 적힌 스티커라고 보면 됨 | DebateRequest = 상자 설계도 | request = 상자 별명
         String topic = request.topic();
         String now = LocalDateTime.now().toString();
 

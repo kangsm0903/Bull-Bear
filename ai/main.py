@@ -1,6 +1,4 @@
 """
-Python AI 서비스 (주방).
-
 실행: uvicorn main:app --reload --port 8001
 """
 
@@ -9,12 +7,8 @@ from datetime import datetime
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-# FastAPI 앱 = 주방 서버 본체. Spring의 BackendApplication(시동 키)에 해당.
 app = FastAPI(title="BullBear AI Service")
 
-
-# ── 들어오는 주문서 모양 - Java의 DebateRequest에 대응 ──────────────
-# BaseModel을 상속하면, 들어온 JSON을 이 모양의 객체로 자동 변환해준다.
 class Survey(BaseModel):
     depth: str | None = None      # 설명 깊이
     horizon: str | None = None    # 희망 투자 기간
@@ -25,13 +19,13 @@ class DebateRequest(BaseModel):
     survey: Survey | None = None
 
 
-# ── 서버가 살아있는지 확인용 (가장 단순한 엔드포인트) ────────────────
+# ── 서버가 살아있는지 확인용 ────────────────
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-# ── 토론 생성 (지금은 목업) ──────────────────────────────────────
+# ── 토론 생성  ──────────────────────────────────────
 @app.post("/debate")
 def debate(request: DebateRequest):
     topic = request.topic

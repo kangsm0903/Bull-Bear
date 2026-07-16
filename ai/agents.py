@@ -1,6 +1,7 @@
 import json
 
 from config import MODEL, client
+from news import search_news
 
 
 BULL_SYSTEM_PROMPT = """
@@ -45,26 +46,77 @@ Bull(상승론)과 Bear(하락론)의 주장을 모두 읽고 공정하게 평�
 """
 
 
-def run_bull(topic: str) -> str:
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": BULL_SYSTEM_PROMPT},
-            {"role": "user", "content": f"종목: {topic}\n이 종목의 상승 논리를 펼쳐줘."},
-        ],
-    )
-    return response.choices[0].message.content
+# ── search_news 도구 명세: AI에게 "이런 함수 쓸 수 있어"라고 알려주는 설명서 ──
+SEARCH_NEWS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_news",
+        "description": "이 종목의 최근 뉴스 기사를 검색한다. 주장의 근거가 될 기사를 찾을 때 사용.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "검색 키워드(예: 'HBM', '실적', '배당'). 비우면 최신 기사 전체.",
+                },
+            },
+            "required": [],
+        },
+    },
+}
 
 
-def run_bear(topic: str) -> str:
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": BEAR_SYSTEM_PROMPT},
-            {"role": "user", "content": f"종목: {topic}\n이 종목의 하락 논리를 펼쳐줘."},
-        ],
-    )
-    return response.choices[0].message.content
+def _run_agent_with_tools(system_prompt: str, user_prompt: str, ticker: str,
+                          agent_name: str) -> tuple[str, list[dict]]:
+    """에이전트를 실행하되, 필요하면 search_news를 호출하게 한다.
+    최종 답변 텍스트와, 그 과정에서 가져온 기사 목록을 함께 반환한다."""
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    used_articles: list[dict] = []
+
+    while True:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=[SEARCH_NEWS_TOOL],   # 쓸 수 있는 도구 목록을 알려줌
+        )
+        message = response.choices[0].message
+
+        # 도구 호출 요청이 없으면 = 최종 답변 → 종료
+        if not message.tool_calls:
+            return message.content, used_articles
+
+        # 도구를 요청했으면: 그 요청 메시지를 대화에 기록하고
+        messages.append(message)
+        for call in message.tool_calls:
+            args = json.loads(call.function.arguments)      # AI가 넘긴 인자(JSON)
+            keyword = args.get("keyword", "")
+            articles = search_news(ticker, keyword)
+            used_articles.extend(articles)
+
+            # 어떤 키워드로 무슨 기사를 가져왔는지 로그
+            print(f"[{agent_name}] 🔍 search_news(keyword={keyword!r}) → {len(articles)}건")
+            for a in articles:
+                print(f"    - {a['title'][:50]} ({a['published_at']})")
+
+            # 실행 결과를 'tool' 역할 메시지로 AI에게 돌려줌
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps(articles, ensure_ascii=False),
+            })
+
+
+def run_bull(topic: str, ticker: str) -> tuple[str, list[dict]]:
+    user_prompt = f"종목: {topic}\n뉴스를 검색해 근거로 삼아, 이 종목의 상승 논리를 펼쳐줘."
+    return _run_agent_with_tools(BULL_SYSTEM_PROMPT, user_prompt, ticker, "🐂 Bull")
+
+
+def run_bear(topic: str, ticker: str) -> tuple[str, list[dict]]:
+    user_prompt = f"종목: {topic}\n뉴스를 검색해 근거로 삼아, 이 종목의 하락 논리를 펼쳐줘."
+    return _run_agent_with_tools(BEAR_SYSTEM_PROMPT, user_prompt, ticker, "🐻 Bear")
 
 
 def run_moderator(topic: str, bull_argument: str, bear_argument: str) -> dict:
